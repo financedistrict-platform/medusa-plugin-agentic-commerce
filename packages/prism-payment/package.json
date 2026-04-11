@@ -5,7 +5,9 @@
   "author": "Finance District <dev@fd.xyz>",
   "license": "MIT",
   "keywords": [
+    "medusajs",
     "medusa-v2",
+    "medusa-plugin",
     "medusa-plugin-payment",
     "agentic-commerce",
     "x402",
@@ -13,7 +15,10 @@
     "eip-3009",
     "usdc",
     "prism",
-    "ai-agent"
+    "ai-agent",
+    "crypto-payments",
+    "base-chain",
+    "machine-to-machine"
   ],
   "main": "./.medusa/server/src/index.js",
   "types": "./.medusa/server/src/index.d.ts",
@@ -29,7 +34,8 @@
   "files": [
     ".medusa",
     "package.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "medusa plugin:build",

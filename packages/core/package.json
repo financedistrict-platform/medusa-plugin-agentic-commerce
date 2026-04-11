@@ -5,14 +5,20 @@
   "author": "Finance District <dev@fd.xyz>",
   "license": "MIT",
   "keywords": [
+    "medusajs",
     "medusa-v2",
+    "medusa-plugin",
     "medusa-plugin-integration",
+    "medusa-plugin-other",
     "agentic-commerce",
     "ucp",
     "acp",
     "ai-agent",
     "ai-commerce",
-    "agent-protocol"
+    "agent-protocol",
+    "x402",
+    "machine-to-machine",
+    "commerce-api"
   ],
   "main": "./.medusa/server/src/index.js",
   "types": "./.medusa/server/src/index.d.ts",
@@ -29,7 +35,8 @@
   "files": [
     ".medusa",
     "package.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "medusa plugin:build",

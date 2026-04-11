@@ -1,12 +1,8 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/medusajs/medusa/develop/packages/design-system/icons/src/components/puzzle.tsx" width="64" />
-</p>
-
 <h1 align="center">@financedistrict/medusa-plugin-agentic-commerce</h1>
 
 <p align="center">
   Turn any Medusa v2 store into an AI-native storefront.<br />
-  Adds <strong>UCP</strong> (Unified Commerce Protocol) and <strong>ACP</strong> (Agent Commerce Protocol) endpoints so AI agents can discover products, check out, pay, and track orders — all through standard HTTP APIs.
+  Adds <strong>UCP</strong> and <strong>ACP</strong> protocol endpoints so AI agents can discover products, check out, pay, and track orders — all through standard HTTP APIs.
 </p>
 
 <p align="center">
@@ -21,9 +17,9 @@
 
 ## Why
 
-AI agents are the next storefront. They need machine-readable APIs to browse catalogs, fill carts, handle payments, and confirm orders — without scraping HTML or reverse-engineering checkout flows.
+AI agents are becoming a real commerce channel. They need machine-readable APIs to browse catalogs, fill carts, handle payments, and confirm orders — without scraping HTML or reverse-engineering checkout flows.
 
-This plugin gives your Medusa store a **standards-compliant agent API** in minutes. No custom code, no frontend changes.
+This plugin gives your Medusa store a **standards-compliant agent API** in minutes. No custom code, no frontend changes. And the **pluggable payment handler adapter system** means any payment method — stablecoins, cards, wallets — can be added without modifying the core plugin.
 
 ## What You Get
 
