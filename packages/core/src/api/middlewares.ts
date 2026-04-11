@@ -152,6 +152,25 @@ async function validateUcpRequest(
   next()
 }
 
+// --- Adapter Resolution Middleware ---
+// Resolves payment handler adapters from the request-scoped container.
+// Must run before any route that accesses payment handlers.
+// Module-scoped containers can't see other modules; the request scope can.
+
+async function resolvePaymentAdapters(
+  req: MedusaRequest,
+  _res: MedusaResponse,
+  next: MedusaNextFunction
+) {
+  try {
+    const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
+    agenticCommerceService.resolveAdapters(req.scope)
+  } catch {
+    // Silently skip — service may not be configured
+  }
+  next()
+}
+
 // --- .well-known route handlers ---
 // Medusa's file-based routing ignores directories starting with "." so the
 // actual route files live at src/api/well-known/. These method-specific
@@ -215,29 +234,30 @@ export default defineMiddlewares({
   routes: [
     // --- .well-known route aliases ---
     // Registered as app.get() routes so they work at the standard RFC 8615 path.
+    // resolvePaymentAdapters runs first to ensure adapters are available.
     {
       matcher: "/.well-known/ucp",
       method: "GET",
-      middlewares: [wellKnownUcpHandler],
+      middlewares: [resolvePaymentAdapters, wellKnownUcpHandler],
     },
     {
       matcher: "/.well-known/acp.json",
       method: "GET",
-      middlewares: [wellKnownAcpHandler],
+      middlewares: [resolvePaymentAdapters, wellKnownAcpHandler],
     },
 
-    // --- ACP Auth + Request-Id ---
+    // --- ACP Auth + Adapter Resolution + Request-Id ---
     {
       matcher: "/acp/checkout_sessions*",
-      middlewares: [validateAcpRequest, acpRequestId],
+      middlewares: [validateAcpRequest, resolvePaymentAdapters, acpRequestId],
     },
     {
       matcher: "/acp/orders*",
-      middlewares: [validateAcpRequest, acpRequestId],
+      middlewares: [validateAcpRequest, resolvePaymentAdapters, acpRequestId],
     },
     {
       matcher: "/acp/product-feed*",
-      middlewares: [validateAcpRequest, acpRequestId],
+      middlewares: [validateAcpRequest, resolvePaymentAdapters, acpRequestId],
     },
 
     // --- ACP Idempotency (required on all POSTs) ---
@@ -264,22 +284,22 @@ export default defineMiddlewares({
       middlewares: [validateAndTransformBody(CompleteAcpCheckoutSessionSchema)],
     },
 
-    // --- UCP Auth ---
+    // --- UCP Auth + Adapter Resolution ---
     {
       matcher: "/ucp/catalog/*",
-      middlewares: [validateUcpRequest],
+      middlewares: [validateUcpRequest, resolvePaymentAdapters],
     },
     {
       matcher: "/ucp/checkout-sessions*",
-      middlewares: [validateUcpRequest],
+      middlewares: [validateUcpRequest, resolvePaymentAdapters],
     },
     {
       matcher: "/ucp/carts*",
-      middlewares: [validateUcpRequest],
+      middlewares: [validateUcpRequest, resolvePaymentAdapters],
     },
     {
       matcher: "/ucp/orders*",
-      middlewares: [validateUcpRequest],
+      middlewares: [validateUcpRequest, resolvePaymentAdapters],
     },
 
     // --- UCP Idempotency (required on POST/PUT) ---

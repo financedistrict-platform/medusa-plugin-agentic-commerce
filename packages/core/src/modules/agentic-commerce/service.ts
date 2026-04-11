@@ -52,15 +52,12 @@ export default class AgenticCommerceService {
   private paymentHandlerRegistry: PaymentHandlerRegistry
   private ctx: FormatterContext
 
-  // Lazy adapter resolution — adapters are resolved from the container on first
-  // use rather than in the constructor, because Medusa may not have finished
-  // registering all modules when this service is constructed.
-  private container: Record<string, unknown>
+  // Adapter names configured via plugin options — resolved from the request-
+  // scoped container at runtime via resolveAdapters(scope).
   private adapterNames: string[]
   private adaptersResolved = false
 
-  constructor(container: Record<string, unknown>, options: AgenticCommerceOptions = {}) {
-    this.container = container
+  constructor(_container: Record<string, unknown>, options: AgenticCommerceOptions = {}) {
     this.signatureKey = options.signatureKey || process.env.AGENTIC_COMMERCE_SIGNATURE_KEY || ""
     this.storefrontUrl = options.storefront_url || process.env.STOREFRONT_URL || "http://localhost:8000"
     this.storeName = options.store_name || process.env.AGENTIC_STORE_NAME || "My Store"
@@ -88,16 +85,23 @@ export default class AgenticCommerceService {
   }
 
   /**
-   * Resolve payment handler adapters from the Medusa DI container.
-   * Called lazily on first use — by request time all modules are registered.
+   * Resolve payment handler adapters from the request-scoped Medusa container.
+   *
+   * Module-scoped containers (passed to the constructor) cannot access other
+   * top-level modules. The request-scoped container (req.scope) has access to
+   * everything, so callers pass it in at request time.
+   *
+   * Idempotent: once adapters are successfully resolved, subsequent calls are
+   * no-ops. If the first attempt fails (zero adapters), retries on next call.
    */
-  private resolveAdapters(): void {
-    if (this.adaptersResolved) return
+  resolveAdapters(scope: { resolve: (name: string) => unknown }): void {
+    if (this.adaptersResolved && this.paymentHandlerRegistry.getAdapterCount() > 0) return
+    if (this.adapterNames.length === 0) return
     this.adaptersResolved = true
 
     for (const name of this.adapterNames) {
       try {
-        const adapter = (this.container as any)[name] as PaymentHandlerAdapter | undefined
+        const adapter = scope.resolve(name) as PaymentHandlerAdapter | undefined
         if (adapter && typeof adapter.getUcpDiscoveryHandlers === "function") {
           this.paymentHandlerRegistry.registerAdapter(adapter)
         } else {
@@ -146,7 +150,6 @@ export default class AgenticCommerceService {
   // =====================================================
 
   formatAcpCheckoutSession(cart: any, baseUrl: string) {
-    this.resolveAdapters()
     return acpFormatter.formatAcpCheckoutSession(this.ctx, cart, baseUrl)
   }
 
@@ -159,7 +162,6 @@ export default class AgenticCommerceService {
   }
 
   formatUcpCheckoutSession(cart: any, baseUrl: string) {
-    this.resolveAdapters()
     return ucpFormatter.formatUcpCheckoutSession(this.ctx, cart, baseUrl)
   }
 
@@ -186,7 +188,6 @@ export default class AgenticCommerceService {
   getUcpVersion(): string { return this.ucpVersion }
   getAcpVersion(): string { return this.acpVersion }
   getPaymentHandlerService(): PaymentHandlerRegistry {
-    this.resolveAdapters()
     return this.paymentHandlerRegistry
   }
 
