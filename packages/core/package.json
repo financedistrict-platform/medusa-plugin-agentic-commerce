@@ -1,0 +1,52 @@
+{
+  "name": "@financedistrict/medusa-plugin-agentic-commerce",
+  "version": "0.1.0",
+  "description": "Agentic commerce plugin for Medusa v2 — adds UCP and ACP protocol support, enabling AI agents to browse, checkout, and pay at any Medusa storefront.",
+  "author": "Finance District <dev@fd.xyz>",
+  "license": "MIT",
+  "keywords": [
+    "medusa-v2",
+    "medusa-plugin-integration",
+    "agentic-commerce",
+    "ucp",
+    "acp",
+    "ai-agent",
+    "ai-commerce",
+    "agent-protocol"
+  ],
+  "main": "./.medusa/server/index.js",
+  "types": "./.medusa/server/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./.medusa/server/index.d.ts",
+      "default": "./.medusa/server/index.js"
+    },
+    "./package.json": "./package.json",
+    "./workflows": "./.medusa/server/workflows/index.js",
+    "./modules/*": "./.medusa/server/modules/*/index.js",
+    "./.medusa/server/src/modules/*": "./.medusa/server/modules/*/index.js"
+  },
+  "files": [
+    ".medusa",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "medusa plugin:build",
+    "develop": "medusa plugin:develop",
+    "publish:local": "medusa plugin:publish",
+    "db:generate": "medusa plugin:db:generate",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@medusajs/framework": "^2.13.0",
+    "@medusajs/medusa": "^2.13.0",
+    "@medusajs/cli": "^2.13.0",
+    "@swc/core": "^1.5.0",
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "@medusajs/framework": "^2.13.0",
+    "@medusajs/medusa": "^2.13.0"
+  }
+}

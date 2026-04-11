@@ -1,0 +1,52 @@
+{
+  "name": "@financedistrict/medusa-plugin-prism-payment",
+  "version": "0.1.0",
+  "description": "Prism x402 stablecoin payment handler for Medusa agentic commerce — enables AI agents to pay with USDC, FDUSD, and other stablecoins via EIP-3009 authorizations.",
+  "author": "Finance District <dev@fd.xyz>",
+  "license": "MIT",
+  "keywords": [
+    "medusa-v2",
+    "medusa-plugin-payment",
+    "agentic-commerce",
+    "x402",
+    "stablecoin",
+    "eip-3009",
+    "usdc",
+    "prism",
+    "ai-agent"
+  ],
+  "main": "./.medusa/server/index.js",
+  "types": "./.medusa/server/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./.medusa/server/index.d.ts",
+      "default": "./.medusa/server/index.js"
+    },
+    "./package.json": "./package.json",
+    "./modules/*": "./.medusa/server/modules/*/index.js",
+    "./.medusa/server/src/modules/*": "./.medusa/server/modules/*/index.js"
+  },
+  "files": [
+    ".medusa",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "medusa plugin:build",
+    "develop": "medusa plugin:develop",
+    "publish:local": "medusa plugin:publish",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@medusajs/framework": "^2.13.0",
+    "@medusajs/medusa": "^2.13.0",
+    "@medusajs/cli": "^2.13.0",
+    "@swc/core": "^1.5.0",
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "@medusajs/framework": "^2.13.0",
+    "@medusajs/medusa": "^2.13.0",
+    "@financedistrict/medusa-plugin-agentic-commerce": "^0.1.0"
+  }
+}

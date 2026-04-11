@@ -1,0 +1,13 @@
+{
+  "name": "medusa-plugin-agentic-commerce-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/core",
+    "packages/prism-payment"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:core": "npm run build -w packages/core",
+    "build:prism": "npm run build -w packages/prism-payment"
+  }
+}

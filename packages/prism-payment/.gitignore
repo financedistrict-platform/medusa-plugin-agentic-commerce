@@ -1,0 +1,6 @@
+node_modules/
+.medusa/
+dist/
+.env
+*.log
+.DS_Store
