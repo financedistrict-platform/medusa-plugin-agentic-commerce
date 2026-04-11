@@ -3,5 +3,6 @@ node_modules/
 dist/
 .env
 *.log
+*.tgz
 .DS_Store
 package-lock.json

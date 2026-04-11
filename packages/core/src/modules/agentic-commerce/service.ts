@@ -52,7 +52,15 @@ export default class AgenticCommerceService {
   private paymentHandlerRegistry: PaymentHandlerRegistry
   private ctx: FormatterContext
 
+  // Lazy adapter resolution — adapters are resolved from the container on first
+  // use rather than in the constructor, because Medusa may not have finished
+  // registering all modules when this service is constructed.
+  private container: Record<string, unknown>
+  private adapterNames: string[]
+  private adaptersResolved = false
+
   constructor(container: Record<string, unknown>, options: AgenticCommerceOptions = {}) {
+    this.container = container
     this.signatureKey = options.signatureKey || process.env.AGENTIC_COMMERCE_SIGNATURE_KEY || ""
     this.storefrontUrl = options.storefront_url || process.env.STOREFRONT_URL || "http://localhost:8000"
     this.storeName = options.store_name || process.env.AGENTIC_STORE_NAME || "My Store"
@@ -62,13 +70,34 @@ export default class AgenticCommerceService {
     this.ucpVersion = options.ucp_version || "2026-01-11"
     this.acpVersion = options.acp_version || "2026-01-30"
 
-    // Create payment handler registry and resolve adapters from the container
     this.paymentHandlerRegistry = new PaymentHandlerRegistry()
+    this.adapterNames = options.payment_handler_adapters || []
 
-    const adapterNames = options.payment_handler_adapters || []
-    for (const name of adapterNames) {
+    if (this.adapterNames.length === 0) {
+      console.info("[agentic-commerce] No payment handler adapters configured. Payment handler discovery will return empty results.")
+    }
+
+    // Shared context passed to all formatters
+    this.ctx = {
+      storeName: this.storeName,
+      storefrontUrl: this.storefrontUrl,
+      ucpVersion: this.ucpVersion,
+      acpVersion: this.acpVersion,
+      paymentHandlers: this.paymentHandlerRegistry,
+    }
+  }
+
+  /**
+   * Resolve payment handler adapters from the Medusa DI container.
+   * Called lazily on first use — by request time all modules are registered.
+   */
+  private resolveAdapters(): void {
+    if (this.adaptersResolved) return
+    this.adaptersResolved = true
+
+    for (const name of this.adapterNames) {
       try {
-        const adapter = (container as any)[name] as PaymentHandlerAdapter | undefined
+        const adapter = (this.container as any)[name] as PaymentHandlerAdapter | undefined
         if (adapter && typeof adapter.getUcpDiscoveryHandlers === "function") {
           this.paymentHandlerRegistry.registerAdapter(adapter)
         } else {
@@ -80,17 +109,8 @@ export default class AgenticCommerceService {
       }
     }
 
-    if (adapterNames.length === 0) {
-      console.info("[agentic-commerce] No payment handler adapters configured. Payment handler discovery will return empty results.")
-    }
-
-    // Shared context passed to all formatters
-    this.ctx = {
-      storeName: this.storeName,
-      storefrontUrl: this.storefrontUrl,
-      ucpVersion: this.ucpVersion,
-      acpVersion: this.acpVersion,
-      paymentHandlers: this.paymentHandlerRegistry,
+    if (this.adapterNames.length > 0 && this.paymentHandlerRegistry.getAdapterCount() === 0) {
+      console.warn("[agentic-commerce] Configured payment handler adapters could not be resolved. Payment discovery will be empty.")
     }
   }
 
@@ -126,6 +146,7 @@ export default class AgenticCommerceService {
   // =====================================================
 
   formatAcpCheckoutSession(cart: any, baseUrl: string) {
+    this.resolveAdapters()
     return acpFormatter.formatAcpCheckoutSession(this.ctx, cart, baseUrl)
   }
 
@@ -138,6 +159,7 @@ export default class AgenticCommerceService {
   }
 
   formatUcpCheckoutSession(cart: any, baseUrl: string) {
+    this.resolveAdapters()
     return ucpFormatter.formatUcpCheckoutSession(this.ctx, cart, baseUrl)
   }
 
@@ -163,7 +185,10 @@ export default class AgenticCommerceService {
   getPaymentProviderId(): string { return this.paymentProviderId }
   getUcpVersion(): string { return this.ucpVersion }
   getAcpVersion(): string { return this.acpVersion }
-  getPaymentHandlerService(): PaymentHandlerRegistry { return this.paymentHandlerRegistry }
+  getPaymentHandlerService(): PaymentHandlerRegistry {
+    this.resolveAdapters()
+    return this.paymentHandlerRegistry
+  }
 
   // =====================================================
   // Webhooks

@@ -15,16 +15,16 @@
     "prism",
     "ai-agent"
   ],
-  "main": "./.medusa/server/index.js",
-  "types": "./.medusa/server/index.d.ts",
+  "main": "./.medusa/server/src/index.js",
+  "types": "./.medusa/server/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./.medusa/server/index.d.ts",
-      "default": "./.medusa/server/index.js"
+      "types": "./.medusa/server/src/index.d.ts",
+      "default": "./.medusa/server/src/index.js"
     },
     "./package.json": "./package.json",
-    "./modules/*": "./.medusa/server/modules/*/index.js",
-    "./.medusa/server/src/modules/*": "./.medusa/server/modules/*/index.js"
+    "./modules/*": "./.medusa/server/src/modules/*/index.js",
+    "./.medusa/server/src/modules/*": "./.medusa/server/src/modules/*/index.js"
   },
   "files": [
     ".medusa",

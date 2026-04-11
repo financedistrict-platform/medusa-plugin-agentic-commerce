@@ -41,6 +41,13 @@ export class PaymentHandlerRegistry {
     return this.adapters
   }
 
+  /**
+   * Get the number of registered adapters.
+   */
+  getAdapterCount(): number {
+    return this.adapters.length
+  }
+
   // -------------------------------------------------
   // Discovery — for .well-known/ucp and .well-known/acp.json
   // -------------------------------------------------
