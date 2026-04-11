@@ -152,19 +152,78 @@ async function validateUcpRequest(
   next()
 }
 
+// --- .well-known route handlers ---
+// Medusa's file-based routing ignores directories starting with "." so the
+// actual route files live at src/api/well-known/. These method-specific
+// middleware entries register proper Express routes at the standard
+// /.well-known/ paths that proxy to the real handlers.
+
+async function wellKnownUcpHandler(req: MedusaRequest, res: MedusaResponse) {
+  const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
+  const paymentHandlers = agenticCommerceService.getPaymentHandlerService()
+  const ucpVersion = agenticCommerceService.getUcpVersion()
+  const handlers = await paymentHandlers.getUcpDiscoveryHandlers()
+  const baseUrl = `${req.protocol}://${req.get("host")}`
+
+  res.json({
+    ucp: {
+      version: ucpVersion,
+      services: {
+        "dev.ucp.shopping": [{
+          version: ucpVersion,
+          transport: "rest",
+          endpoint: `${baseUrl}/ucp`,
+        }],
+      },
+      capabilities: {
+        "dev.ucp.shopping.catalog.search": [{ version: ucpVersion }],
+        "dev.ucp.shopping.catalog.lookup": [{ version: ucpVersion }],
+        "dev.ucp.shopping.checkout": [{ version: ucpVersion }],
+        "dev.ucp.shopping.cart": [{ version: ucpVersion }],
+        "dev.ucp.shopping.order": [{ version: ucpVersion }],
+      },
+      payment_handlers: handlers,
+    },
+  })
+}
+
+async function wellKnownAcpHandler(req: MedusaRequest, res: MedusaResponse) {
+  const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
+  const paymentHandlers = agenticCommerceService.getPaymentHandlerService()
+  const acpVersion = agenticCommerceService.getAcpVersion()
+  const handlers = await paymentHandlers.getAcpDiscoveryHandlers()
+  const baseUrl = `${req.protocol}://${req.get("host")}`
+
+  res.json({
+    protocol: {
+      name: "acp",
+      version: acpVersion,
+      supported_versions: [acpVersion],
+    },
+    api_base_url: `${baseUrl}/acp`,
+    transports: ["rest"],
+    capabilities: {
+      services: ["checkout", "orders"],
+      payment: { handlers },
+      supported_currencies: ["eur"],
+      supported_locales: ["en"],
+    },
+  })
+}
+
 export default defineMiddlewares({
   routes: [
-    // --- .well-known rewrite ---
-    // Medusa build skips directories starting with "." so we serve
-    // from /well-known/* and rewrite the standard /.well-known/* path.
+    // --- .well-known route aliases ---
+    // Registered as app.get() routes so they work at the standard RFC 8615 path.
     {
-      matcher: "/.well-known/*",
-      middlewares: [
-        (req: MedusaRequest, _res: MedusaResponse, next: MedusaNextFunction) => {
-          req.url = req.url.replace("/.well-known/", "/well-known/")
-          next()
-        },
-      ],
+      matcher: "/.well-known/ucp",
+      method: "GET",
+      middlewares: [wellKnownUcpHandler],
+    },
+    {
+      matcher: "/.well-known/acp.json",
+      method: "GET",
+      middlewares: [wellKnownAcpHandler],
     },
 
     // --- ACP Auth + Request-Id ---
