@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { ORDER_FIELDS } from "../../../../lib/order-fields"
+import { ORDER_FIELDS, FULFILLMENT_FIELDS } from "../../../../lib/order-fields"
 import { formatAcpError, httpStatusToAcpType } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 
@@ -21,6 +21,18 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
         httpStatus: 404,
       }))
       return
+    }
+
+    // Fulfillments are a separate module — query via order link
+    try {
+      const { data: fulfillments } = await query.graph({
+        entity: "order_fulfillment",
+        fields: FULFILLMENT_FIELDS,
+        filters: { order_id: id },
+      })
+      order.fulfillments = fulfillments || []
+    } catch {
+      order.fulfillments = []
     }
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any

@@ -20,6 +20,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       ? acpAddressToMedusa(body.fulfillment_details.address)
       : undefined
 
+    const agentIdentifier = req.headers["user-agent"] as string | undefined
+    const protocolVersion = req.headers["api-version"] as string | undefined
+
     const { result: cart } = await createCheckoutSessionWorkflow(req.scope).run({
       input: {
         items,
@@ -29,6 +32,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         region_id: body.region_id,
         currency_code: body.currency_code,
         protocol: "acp",
+        agent_identifier: agentIdentifier,
+        protocol_version: protocolVersion,
       } as any,
     })
 

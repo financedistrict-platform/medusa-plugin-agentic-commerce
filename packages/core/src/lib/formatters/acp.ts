@@ -140,11 +140,24 @@ export function formatAcpOrder(ctx: FormatterContext, order: any, baseUrl: strin
     { type: "total", display_text: "Total", amount: toMinor(order.total ?? order.raw_total?.value ?? 0) },
   ]
 
+  const fulfillmentEvents = (order.fulfillments || []).map((f: any) => ({
+    type: f.shipped_at ? "shipped" : "created",
+    timestamp: f.shipped_at || f.created_at,
+    tracking_number: f.labels?.[0]?.tracking_number || null,
+    carrier: f.provider?.id || null,
+    items: (f.items || []).map((i: any) => ({
+      product_id: i.line_item?.product_id || null,
+      quantity: i.quantity,
+    })),
+  }))
+
   const fulfillmentDetails = order.shipping_address
     ? {
         name: [order.shipping_address.first_name, order.shipping_address.last_name].filter(Boolean).join(" ") || undefined,
         email: order.email || undefined,
         address: medusaToAcpAddress(order.shipping_address),
+        status: order.fulfillment_status || "not_fulfilled",
+        events: fulfillmentEvents,
       }
     : null
 

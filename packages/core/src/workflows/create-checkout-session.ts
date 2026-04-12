@@ -22,6 +22,8 @@ type CreateCheckoutSessionInput = {
   buyer?: { email?: string; name?: string }
   webhook_url?: string
   protocol: "acp" | "ucp"
+  agent_identifier?: string
+  protocol_version?: string
 }
 
 const createCheckoutSessionWorkflow = createWorkflow(
@@ -55,7 +57,13 @@ const createCheckoutSessionWorkflow = createWorkflow(
           })),
           metadata: {
             is_checkout_session: true,
-            protocol: input.protocol,
+            protocol_type: input.protocol,
+            protocol_version: input.protocol_version || null,
+            // Sanitize: strip control chars, truncate to 256 chars
+            agent_identifier: (input.agent_identifier || "unknown")
+              .replace(/[\x00-\x1f\x7f]/g, "")
+              .slice(0, 256),
+            checkout_session_created_at: new Date().toISOString(),
             ...(input.webhook_url ? { agent_webhook_url: input.webhook_url } : {}),
           },
           ...(address ? { shipping_address: address } : {}),

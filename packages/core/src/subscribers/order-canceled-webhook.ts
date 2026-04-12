@@ -1,7 +1,7 @@
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
 import { sendAgentWebhook } from "./lib/agent-webhook"
 
-export default async function orderPlacedWebhookHandler({
+export default async function orderCanceledWebhookHandler({
   event,
   container,
 }: SubscriberArgs<{ id: string }>) {
@@ -14,17 +14,17 @@ export default async function orderPlacedWebhookHandler({
   await sendAgentWebhook({
     container,
     orderId,
-    eventType: "order_create",
+    eventType: "order_cancel",
     buildPayload: (order, cart) => ({
       type: "order",
       checkout_session_id: cart.id,
+      order_id: order.id,
       permalink_url: `${storefrontUrl}/orders/${order.id}`,
-      status: order.status || "created",
-      refunds: [],
+      status: "canceled",
     }),
   })
 }
 
 export const config: SubscriberConfig = {
-  event: "order.placed",
+  event: "order.canceled",
 }

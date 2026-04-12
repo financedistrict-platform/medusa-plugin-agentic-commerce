@@ -16,6 +16,7 @@ import crypto from "crypto"
 import { PaymentHandlerRegistry } from "../../lib/payment-handler-registry"
 import type { PaymentHandlerAdapter } from "../../types/payment-handler-adapter"
 import type { FormatterContext } from "../../lib/formatters/types"
+import { validateWebhookUrl } from "../../lib/validate-webhook-url"
 import * as ucpFormatter from "../../lib/formatters/ucp"
 import * as acpFormatter from "../../lib/formatters/acp"
 
@@ -51,6 +52,11 @@ export default class AgenticCommerceService {
   private acpVersion: string
   private paymentHandlerRegistry: PaymentHandlerRegistry
   private ctx: FormatterContext
+
+  private ucpEnabled = true
+  private acpEnabled = true
+  private settingsLastRefreshed = 0
+  private static SETTINGS_CACHE_TTL = 60_000 // 60 seconds
 
   // Adapter names configured via plugin options — resolved from the request-
   // scoped container at runtime via resolveAdapters(scope).
@@ -142,7 +148,16 @@ export default class AgenticCommerceService {
   }
 
   validateApiKey(key: string): boolean {
-    return key === this.apiKey
+    if (!this.apiKey || !key) return false
+    try {
+      return crypto.timingSafeEqual(
+        Buffer.from(key),
+        Buffer.from(this.apiKey)
+      )
+    } catch {
+      // Length mismatch — keys don't match
+      return false
+    }
   }
 
   // =====================================================
@@ -192,6 +207,46 @@ export default class AgenticCommerceService {
   }
 
   // =====================================================
+  // Runtime Settings (from store metadata)
+  // =====================================================
+
+  isUcpEnabled(): boolean { return this.ucpEnabled }
+  isAcpEnabled(): boolean { return this.acpEnabled }
+
+  /**
+   * Reload settings from store.metadata.agentic_commerce.
+   * Cached for 60 seconds to avoid hitting the DB on every request.
+   */
+  async refreshSettings(query: any): Promise<void> {
+    const now = Date.now()
+    if (now - this.settingsLastRefreshed < AgenticCommerceService.SETTINGS_CACHE_TTL) return
+
+    try {
+      const { data: [store] } = await query.graph({
+        entity: "store",
+        fields: ["metadata"],
+      })
+      const settings = store?.metadata?.agentic_commerce
+      if (settings) {
+        if (settings.store_name) this.storeName = settings.store_name
+        if (settings.store_description !== undefined) this.storeDescription = settings.store_description
+        if (settings.storefront_url) this.storefrontUrl = settings.storefront_url
+        if (settings.api_key) this.apiKey = settings.api_key
+        if (settings.signature_key) this.signatureKey = settings.signature_key
+        if (settings.ucp_enabled !== undefined) this.ucpEnabled = settings.ucp_enabled
+        if (settings.acp_enabled !== undefined) this.acpEnabled = settings.acp_enabled
+
+        // Update formatter context
+        this.ctx.storeName = this.storeName
+        this.ctx.storefrontUrl = this.storefrontUrl
+      }
+      this.settingsLastRefreshed = now
+    } catch (error: any) {
+      console.warn("[agentic-commerce] Failed to refresh settings from store metadata:", error.message)
+    }
+  }
+
+  // =====================================================
   // Webhooks
   // =====================================================
 
@@ -199,7 +254,15 @@ export default class AgenticCommerceService {
     url: string
     event_type: string
     payload: Record<string, unknown>
-  }): Promise<void> {
+    maxRetries?: number
+  }): Promise<{ status: number; success: boolean }> {
+    // SSRF protection — validate URL before fetching
+    const urlCheck = await validateWebhookUrl(params.url)
+    if (!urlCheck.valid) {
+      console.warn(`[agentic-commerce] Blocked webhook to unsafe URL: ${urlCheck.reason}`)
+      return { status: 0, success: false }
+    }
+
     const body = JSON.stringify({
       type: params.event_type,
       data: params.payload,
@@ -207,20 +270,36 @@ export default class AgenticCommerceService {
 
     const signature = this.signPayload(body)
     const timestamp = new Date().toISOString()
+    const maxRetries = params.maxRetries ?? 3
+    const delays = [0, 2000, 10000]
 
-    try {
-      await fetch(params.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Merchant-Signature": signature,
-          "Timestamp": timestamp,
-        },
-        body,
-      })
-    } catch {
-      // Best effort — don't throw on webhook failure
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, delays[attempt] || 10000))
+      }
+      try {
+        const response = await fetch(params.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Merchant-Signature": signature,
+            "Timestamp": timestamp,
+          },
+          body,
+          signal: AbortSignal.timeout(10_000), // 10s timeout per attempt
+        })
+        if (response.ok) {
+          return { status: response.status, success: true }
+        }
+        // Client error — don't retry
+        if (response.status >= 400 && response.status < 500) {
+          return { status: response.status, success: false }
+        }
+      } catch {
+        // Network error or timeout — retry
+      }
     }
+    return { status: 0, success: false }
   }
 
   // =====================================================

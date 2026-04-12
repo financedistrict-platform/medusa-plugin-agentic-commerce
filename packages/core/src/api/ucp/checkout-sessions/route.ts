@@ -24,6 +24,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const regionId = body.context?.region
     const currencyCode = body.context?.currency
 
+    const agentIdentifier = req.headers["ucp-agent"] as string | undefined
+
     const { result: cart } = await createCheckoutSessionWorkflow(req.scope).run({
       input: {
         items,
@@ -32,6 +34,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         region_id: regionId,
         currency_code: currencyCode,
         protocol: "ucp",
+        agent_identifier: agentIdentifier,
+        protocol_version: UCP_VERSION,
       } as any,
     })
 

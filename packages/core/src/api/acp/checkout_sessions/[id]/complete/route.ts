@@ -34,8 +34,27 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     })
 
-    // Fetch completed cart for formatting
+    // Enrich cart metadata with payment details and completion timestamp
     const query = req.scope.resolve("query") as any
+    const { data: [cartForMeta] } = await query.graph({
+      entity: "cart",
+      fields: ["id", "metadata", "total", "currency_code"],
+      filters: { id },
+    })
+    if (cartForMeta) {
+      const cartModuleService = req.scope.resolve("cart") as any
+      await cartModuleService.updateCarts(id, {
+        metadata: {
+          ...cartForMeta.metadata,
+          payment_method: eip3009Authorization ? "x402" : "other",
+          payment_amount: cartForMeta.total != null ? String(cartForMeta.total / 100) : null,
+          payment_currency: cartForMeta.currency_code || null,
+          checkout_session_completed_at: new Date().toISOString(),
+        },
+      })
+    }
+
+    // Fetch completed cart for formatting
     const { data: [cart] } = await query.graph({
       entity: "cart",
       fields: CHECKOUT_SESSION_CART_FIELDS,
