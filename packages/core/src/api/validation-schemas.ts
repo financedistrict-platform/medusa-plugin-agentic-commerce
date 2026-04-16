@@ -143,25 +143,29 @@ export const UpdateUcpCheckoutSessionSchema = z.object({
 })
 
 /**
+ * UCP payment instrument schema.
+ * Matches the UCP spec: checkout.json → payment.json → payment_instrument.json
+ */
+const UcpPaymentInstrumentSchema = z.object({
+  /** Unique identifier for this instrument instance */
+  id: z.string().optional(),
+  /** The handler instance that produced this instrument (e.g., "prism_default") */
+  handler_id: z.string().optional(),
+  /** Broad category of the instrument (e.g., "default", "card") */
+  type: z.string().optional(),
+  /** Payment credential — structure is handler-defined */
+  credential: z.record(z.unknown()).optional(),
+})
+
+/**
  * UCP complete checkout schema.
- * Uses the instrument model matching UCP spec — handler + instrument with credential.
+ * Matches the UCP spec: payment is required on complete, contains instruments[].
+ * Also accepts legacy payment_credentials for backwards compatibility.
  */
 export const CompleteUcpCheckoutSessionSchema = z.object({
-  payment_credentials: z.object({
-    handler: z.string().optional(), // "xyz.fd.prism_payment"
-    instrument: z.object({
-      type: z.string().optional(), // "eip3009_authorization"
-      credential: z.object({
-        /** Base64-encoded x402 PaymentAuthorizationResult JSON */
-        authorization: z.string().optional(),
-        /** x402 protocol version (1 or 2) */
-        x402_version: z.number().int().optional(),
-      }).optional(),
-    }).optional(),
-    /** @deprecated Legacy flat token field. Use instrument.credential.authorization instead. */
-    token: z.string().optional(),
-    chain: z.string().optional(),
-    currency: z.string().optional(),
+  /** UCP spec payment field — required on complete per checkout.json */
+  payment: z.object({
+    instruments: z.array(UcpPaymentInstrumentSchema).min(1),
   }).optional(),
 })
 

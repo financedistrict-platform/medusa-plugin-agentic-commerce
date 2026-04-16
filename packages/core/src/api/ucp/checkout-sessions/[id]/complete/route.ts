@@ -4,6 +4,7 @@ import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-f
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatUcpError } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
+import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -14,25 +15,31 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
   const paymentProviderId = agenticCommerceService.getPaymentProviderId()
 
-  // Translate UCP payment credentials to internal format
-  // Supports both new (instrument.credential.authorization) and legacy (flat token) fields
-  const paymentCreds = body?.payment_credentials
-  const instrumentCredential = paymentCreds?.instrument?.credential
-  const eip3009Authorization = instrumentCredential?.authorization || paymentCreds?.token
-  const x402Version = instrumentCredential?.x402_version
+  // Extract payment from UCP spec (payment.instruments[]) or legacy (payment_credentials)
+  const extracted = extractUcpPayment(body || {})
+
+  // F6: Require payment credentials to prevent completing checkout without paying
+  if (!extracted) {
+    res.status(400).json(formatUcpError({
+      ucpVersion: UCP_VERSION,
+      code: "missing_payment",
+      content: "Payment is required to complete checkout. Provide payment.instruments with a valid credential.",
+    }))
+    return
+  }
+
+  const { eip3009Authorization, x402Version, handlerId } = extracted
 
   try {
     const { result } = await completeCheckoutSessionWorkflow(req.scope).run({
       input: {
         cart_id: id,
         payment_provider_id: paymentProviderId,
-        payment_data: eip3009Authorization
-          ? {
-              eip3009_authorization: eip3009Authorization,
-              x402_version: x402Version,
-              handler_id: paymentCreds?.handler,
-            }
-          : undefined,
+        payment_data: {
+          eip3009_authorization: eip3009Authorization,
+          x402_version: x402Version,
+          handler_id: handlerId,
+        },
       },
     })
 
