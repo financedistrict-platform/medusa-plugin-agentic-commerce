@@ -65,18 +65,32 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       })
     }
 
-    // Fetch completed cart for formatting
+    // Fetch completed cart for formatting (includes the cart→order link)
     const { data: [cart] } = await query.graph({
       entity: "cart",
       fields: CHECKOUT_SESSION_CART_FIELDS,
       filters: { id },
     })
 
+    // Resolve order id: prefer the workflow result, fall back to the cart link.
+    const orderId: string | null =
+      (result as any)?.order_id || (cart as any)?.order?.id || null
+
+    if (!orderId) {
+      res.status(500).json(formatAcpError({
+        type: "processing_error",
+        code: "order_not_created",
+        message: "Checkout completion did not produce an order.",
+        httpStatus: 500,
+      }))
+      return
+    }
+
     const baseUrl = `${getPublicBaseUrl(req)}/acp/checkout_sessions`
     const response = agenticCommerceService.formatAcpCompleteResponse(
       cart || {},
       baseUrl,
-      result.order_id || null,
+      orderId,
       id
     )
 

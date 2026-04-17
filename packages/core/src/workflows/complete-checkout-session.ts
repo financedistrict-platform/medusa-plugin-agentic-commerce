@@ -62,13 +62,25 @@ const completeCheckoutSessionWorkflow = createWorkflow(
       input: transform(input, (input) => ({ id: input.cart_id })),
     })
 
-    // Step 5: Extract order info from result
+    // Step 5: Extract order info from result.
+    // completeCartWorkflow returns { id: order.id } per Medusa core-flows, but
+    // wrap defensively against shape changes across Medusa versions — check a
+    // few likely locations before giving up. The route handler has a further
+    // fallback via the cart→order link.
     const result = transform(
       { completionResult, input },
-      ({ completionResult, input }) => ({
-        cart_id: input.cart_id,
-        order_id: (completionResult as any)?.id || null,
-      })
+      ({ completionResult, input }) => {
+        const cr = completionResult as any
+        const orderId: string | null =
+          cr?.id ||
+          cr?.order_id ||
+          cr?.order?.id ||
+          null
+        return {
+          cart_id: input.cart_id,
+          order_id: orderId,
+        }
+      }
     )
 
     return new WorkflowResponse(result)

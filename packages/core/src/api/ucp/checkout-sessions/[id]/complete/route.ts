@@ -63,12 +63,32 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       })
     }
 
-    // Fetch completed cart for formatting
+    // Fetch completed cart for formatting (includes the cart→order link)
     const { data: [cart] } = await query.graph({
       entity: "cart",
       fields: CHECKOUT_SESSION_CART_FIELDS,
       filters: { id },
     })
+
+    // Resolve the actual order id from whichever source is available.
+    // The workflow result is authoritative for a fresh completion, but the cart's
+    // `order` link is the fallback when the workflow returns an idempotent success
+    // (e.g., cart was already completed in a previous call).
+    const orderId: string | null =
+      (result as any)?.order_id || (cart as any)?.order?.id || null
+
+    // Invariant: a successful complete must produce an order. If we got here
+    // without an order id, the payment authorized but the order wasn't created
+    // — surface as an error rather than lying that status is "completed".
+    if (!orderId) {
+      res.status(500).json(formatUcpError({
+        ucpVersion: UCP_VERSION,
+        code: "order_not_created",
+        content: "Checkout completion did not produce an order. Please retry or contact support.",
+        severity: "unrecoverable",
+      }))
+      return
+    }
 
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/checkout-sessions`
     const session = agenticCommerceService.formatUcpCheckoutSession(cart || {}, baseUrl)
@@ -76,14 +96,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     res.json({
       ...session,
       status: "completed",
-      order: result.order_id
-        ? {
-            id: result.order_id,
-            checkout_id: id,
-            permalink_url: `${agenticCommerceService.getStorefrontUrl()}/orders/${result.order_id}`,
-            links: [{ type: "self", url: `${getPublicBaseUrl(req)}/ucp/orders/${result.order_id}` }],
-          }
-        : null,
+      order: {
+        id: orderId,
+        checkout_id: id,
+        permalink_url: `${agenticCommerceService.getStorefrontUrl()}/orders/${orderId}`,
+        links: [{ type: "self", url: `${getPublicBaseUrl(req)}/ucp/orders/${orderId}` }],
+      },
     })
   } catch (error: any) {
     // On payment failure, refresh payment state

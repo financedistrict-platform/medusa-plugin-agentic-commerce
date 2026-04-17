@@ -246,6 +246,70 @@ describe("UCP formatter — totals per spec", () => {
     expect(discount.amount).toBeLessThan(0)
     expect(discount.amount).toBe(-20000) // toMinor multiplies by 100
   })
+
+  // Regression: Medusa's cart.subtotal may include shipping depending on version.
+  // UCP spec requires subtotal = items only.
+  it("subtotal is items only, NOT including shipping (spec: items pre-shipping)", () => {
+    const session = formatUcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [{ id: "i1", unit_price: 2900, quantity: 1 }],
+      // Cart may report subtotal inclusive of shipping — we must ignore that
+      subtotal: 2905,
+      shipping_total: 5,
+      total: 2905,
+    }, "https://api.test/ucp/checkout-sessions") as any
+
+    const subtotal = session.totals.find((t: any) => t.type === "subtotal")
+    const fulfillment = session.totals.find((t: any) => t.type === "fulfillment")
+    const total = session.totals.find((t: any) => t.type === "total")
+
+    expect(subtotal.amount).toBe(290000) // items only, 2900 * 100
+    expect(fulfillment.amount).toBe(500)
+    expect(total.amount).toBe(290500)
+  })
+
+  it("subtotal sums unit_price * quantity across multiple line items", () => {
+    const session = formatUcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [
+        { id: "i1", unit_price: 10, quantity: 3 }, // 30
+        { id: "i2", unit_price: 25, quantity: 2 }, // 50
+      ],
+    }, "https://api.test/ucp/checkout-sessions") as any
+
+    const subtotal = session.totals.find((t: any) => t.type === "subtotal")
+    expect(subtotal.amount).toBe(8000) // (30 + 50) * 100
+  })
+
+  it("falls back to item_subtotal when items[] is absent", () => {
+    const session = formatUcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [],
+      item_subtotal: 1200,
+      subtotal: 1500, // should be ignored since item_subtotal is present
+      shipping_total: 300,
+    }, "https://api.test/ucp/checkout-sessions") as any
+
+    const subtotal = session.totals.find((t: any) => t.type === "subtotal")
+    expect(subtotal.amount).toBe(120000)
+  })
+})
+
+describe("ACP formatter — subtotal regression", () => {
+  it("subtotal is items only, not items+shipping", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [{ id: "i1", unit_price: 2900, quantity: 1 }],
+      subtotal: 2905,
+      shipping_total: 5,
+      total: 2905,
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    const subtotal = session.totals.find((t: any) => t.type === "subtotal")
+    const total = session.totals.find((t: any) => t.type === "total")
+    expect(subtotal.amount).toBe(290000)
+    expect(total.amount).toBe(290500)
+  })
 })
 
 describe("ACP formatter — spec-compliant top-level structure", () => {

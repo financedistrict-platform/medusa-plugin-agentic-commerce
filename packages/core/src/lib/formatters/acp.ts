@@ -148,13 +148,34 @@ function formatLineItems(items: any[]) {
   })
 }
 
+/**
+ * Compute subtotal directly from line items.
+ *
+ * Medusa's `cart.subtotal` field semantics vary across versions. Per ACP spec,
+ * `subtotal` represents items only (pre-shipping, pre-tax). We compute from
+ * line items for predictability, with graceful fallbacks.
+ */
+function computeSubtotal(cart: any): number {
+  const items = cart.items || []
+  if (items.length > 0) {
+    const sum = items.reduce((acc: number, item: any) => {
+      const unit = item.unit_price ?? item.raw_unit_price?.value ?? 0
+      return acc + unit * (item.quantity || 0)
+    }, 0)
+    return toMinor(sum)
+  }
+  return toMinor(
+    cart.item_subtotal ?? cart.item_total ?? cart.subtotal ?? cart.raw_subtotal?.value ?? 0
+  )
+}
+
 function formatTotals(cart: any) {
   const totals: { type: string; display_text: string; amount: number }[] = []
 
   totals.push({
     type: "subtotal",
     display_text: "Subtotal",
-    amount: toMinor(cart.subtotal ?? cart.raw_subtotal?.value ?? 0),
+    amount: computeSubtotal(cart),
   })
 
   const shipping = toMinor(cart.shipping_total ?? cart.raw_shipping_total?.value ?? 0)
