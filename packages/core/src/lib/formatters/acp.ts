@@ -6,9 +6,53 @@
  */
 
 import { medusaToAcpAddress } from "../address-translator"
-import { resolveAcpStatus } from "../status-maps"
+import { resolveAcpStatus, resolveMissingRequirements } from "../status-maps"
 import type { FormatterContext } from "./types"
 import { toMinor } from "./types"
+
+// =====================================================
+// Dynamic Messages
+// =====================================================
+
+type AcpMessage = {
+  type: "info" | "error"
+  content_type: "text/plain"
+  content: string
+}
+
+function buildAcpCheckoutMessages(ctx: FormatterContext, cart: any, status: string): AcpMessage[] {
+  const messages: AcpMessage[] = []
+
+  if (status === "completed") {
+    messages.push({ type: "info", content_type: "text/plain", content: "Checkout completed successfully." })
+    return messages
+  }
+
+  if (status === "canceled") {
+    messages.push({ type: "info", content_type: "text/plain", content: "This checkout session has been canceled." })
+    return messages
+  }
+
+  const missing = resolveMissingRequirements(cart)
+
+  if (missing.includes("items")) {
+    messages.push({ type: "error", content_type: "text/plain", content: "Add at least one item to the checkout session." })
+  }
+  if (missing.includes("email")) {
+    messages.push({ type: "error", content_type: "text/plain", content: "Provide a buyer email via POST /checkout_sessions/{id} with buyer.email." })
+  }
+  if (missing.includes("shipping_address")) {
+    messages.push({ type: "error", content_type: "text/plain", content: "Provide a fulfillment address via POST /checkout_sessions/{id} with fulfillment_details.address." })
+  }
+
+  if (status === "ready_for_payment") {
+    messages.push({ type: "info", content_type: "text/plain", content: "Checkout is ready. POST /checkout_sessions/{id}/complete with payment_data." })
+  } else if (missing.length === 0) {
+    messages.push({ type: "info", content_type: "text/plain", content: `Checkout session for ${ctx.storeName}.` })
+  }
+
+  return messages
+}
 
 // =====================================================
 // Checkout Session
@@ -76,9 +120,7 @@ export function formatAcpCheckoutSession(ctx: FormatterContext, cart: any, baseU
     totals,
     fulfillment_details: fulfillmentDetails,
     fulfillment_options: fulfillmentOptions,
-    messages: [
-      { type: "info" as const, content_type: "text/plain", content: `Checkout session for ${ctx.storeName}` },
-    ],
+    messages: buildAcpCheckoutMessages(ctx, cart, status),
     links: [
       { type: "terms_of_use", url: `${ctx.storefrontUrl}/terms` },
       { type: "privacy_policy", url: `${ctx.storefrontUrl}/privacy` },

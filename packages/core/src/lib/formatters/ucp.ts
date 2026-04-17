@@ -6,9 +6,97 @@
  */
 
 import { medusaToUcpAddress } from "../address-translator"
-import { resolveUcpStatus } from "../status-maps"
+import { resolveUcpStatus, resolveMissingRequirements } from "../status-maps"
 import type { FormatterContext } from "./types"
 import { toMinor } from "./types"
+
+// =====================================================
+// Dynamic Messages
+// =====================================================
+
+type UcpMessage = {
+  type: "info" | "warning" | "error" | "required_action"
+  code: string
+  content: string
+  severity: "info" | "warning" | "error"
+}
+
+/**
+ * Build messages guiding the agent on what to do next.
+ * Emits required_action entries for missing fields so agents can recover.
+ */
+function buildCheckoutMessages(ctx: FormatterContext, cart: any, status: string): UcpMessage[] {
+  const messages: UcpMessage[] = []
+
+  if (status === "completed") {
+    messages.push({
+      type: "info",
+      code: "checkout_completed",
+      content: "Checkout completed successfully.",
+      severity: "info",
+    })
+    return messages
+  }
+
+  if (status === "canceled") {
+    messages.push({
+      type: "info",
+      code: "checkout_canceled",
+      content: "This checkout session has been canceled.",
+      severity: "info",
+    })
+    return messages
+  }
+
+  // In-progress: surface what's still needed
+  const missing = resolveMissingRequirements(cart)
+
+  if (missing.includes("items")) {
+    messages.push({
+      type: "required_action",
+      code: "missing_items",
+      content: "Add at least one item to the checkout session.",
+      severity: "error",
+    })
+  }
+
+  if (missing.includes("email")) {
+    messages.push({
+      type: "required_action",
+      code: "missing_email",
+      content: "Provide a buyer email via PUT /checkout-sessions/{id} with { buyer: { email } }.",
+      severity: "error",
+    })
+  }
+
+  if (missing.includes("shipping_address")) {
+    messages.push({
+      type: "required_action",
+      code: "missing_shipping_address",
+      content: "Provide a shipping address via PUT /checkout-sessions/{id} with { shipping_address }.",
+      severity: "error",
+    })
+  }
+
+  if (status === "ready_for_complete") {
+    messages.push({
+      type: "info",
+      code: "ready_for_complete",
+      content: "Checkout is ready. POST /checkout-sessions/{id}/complete with payment.instruments[].",
+      severity: "info",
+    })
+  } else if (missing.length === 0) {
+    // No missing requirements but status is incomplete — something else blocks progress
+    messages.push({
+      type: "info",
+      code: "checkout_in_progress",
+      content: `Checkout session for ${ctx.storeName}.`,
+      severity: "info",
+    })
+  }
+
+  return messages
+}
 
 // =====================================================
 // UCP Envelope
@@ -91,9 +179,7 @@ export function formatUcpCheckoutSession(ctx: FormatterContext, cart: any, baseU
     line_items: formatLineItems(cart.items || [], currency),
     totals,
     fulfillment,
-    messages: [
-      { type: "info" as const, code: "checkout_created", content: `Checkout session for ${ctx.storeName}`, severity: "info" },
-    ],
+    messages: buildCheckoutMessages(ctx, cart, status),
     links: [
       { type: "terms_of_service", url: `${ctx.storefrontUrl}/terms` },
       { type: "privacy_policy", url: `${ctx.storefrontUrl}/privacy` },
