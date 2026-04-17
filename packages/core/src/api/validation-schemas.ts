@@ -27,16 +27,25 @@ const AcpAddressSchema = z.object({
   phone_number: z.string().optional(),
 })
 
-// UCP address format (protocol-facing)
+// UCP address format — per spec postal_address.json
 const UcpAddressSchema = z.object({
-  name: z.string().optional(),
-  line1: z.string(),
-  line2: z.string().optional(),
-  city: z.string(),
-  state: z.string().optional(),
+  first_name: z.string().optional(),
+  last_name: z.string().optional(),
+  street_address: z.string(),
+  extended_address: z.string().optional(),
+  address_locality: z.string(),
+  address_region: z.string().optional(),
+  address_country: z.string().min(2),
   postal_code: z.string(),
-  country: z.string().min(2).max(2),
-  phone: z.string().optional(),
+  phone_number: z.string().optional(),
+})
+
+// UCP buyer — per spec buyer.json
+const UcpBuyerSchema = z.object({
+  first_name: z.string().optional(),
+  last_name: z.string().optional(),
+  email: z.string().email().optional(),
+  phone_number: z.string().optional(),
 })
 
 // --- ACP schemas ---
@@ -118,14 +127,13 @@ export const CreateUcpCheckoutSessionSchema = z.object({
     quantity: z.number().int().positive(),
   })).min(1),
   context: z.object({
-    country: z.string().optional(),
-    region: z.string().optional(),
+    address_country: z.string().optional(),
+    address_region: z.string().optional(),
+    postal_code: z.string().optional(),
     currency: z.string().optional(),
+    language: z.string().optional(),
   }).optional(),
-  buyer: z.object({
-    email: z.string().email().optional(),
-    name: z.string().optional(),
-  }).optional(),
+  buyer: UcpBuyerSchema.optional(),
   shipping_address: UcpAddressSchema.optional(),
 })
 
@@ -135,10 +143,7 @@ export const UpdateUcpCheckoutSessionSchema = z.object({
     line_item_id: z.string().optional(),
     quantity: z.number().int().min(0),
   })).optional(),
-  buyer: z.object({
-    email: z.string().email().optional(),
-    name: z.string().optional(),
-  }).optional(),
+  buyer: UcpBuyerSchema.optional(),
   shipping_address: UcpAddressSchema.optional(),
 })
 
@@ -177,13 +182,13 @@ export const CreateUcpCartSchema = z.object({
     quantity: z.number().int().positive(),
   })).optional(),
   context: z.object({
-    country: z.string().optional(),
-    region: z.string().optional(),
+    address_country: z.string().optional(),
+    address_region: z.string().optional(),
+    postal_code: z.string().optional(),
     currency: z.string().optional(),
+    language: z.string().optional(),
   }).optional(),
-  buyer: z.object({
-    email: z.string().email().optional(),
-  }).optional(),
+  buyer: UcpBuyerSchema.optional(),
 })
 
 export const UpdateUcpCartSchema = z.object({
@@ -192,9 +197,7 @@ export const UpdateUcpCartSchema = z.object({
     line_item_id: z.string().optional(),
     quantity: z.number().int().min(0),
   })).optional(),
-  buyer: z.object({
-    email: z.string().email().optional(),
-  }).optional(),
+  buyer: UcpBuyerSchema.optional(),
   shipping_address: UcpAddressSchema.optional(),
 })
 

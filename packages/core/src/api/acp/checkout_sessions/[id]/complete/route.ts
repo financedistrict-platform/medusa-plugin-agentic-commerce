@@ -19,6 +19,17 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const x402Version = credential?.x402_version
   const paymentHandlerId = body?.payment_data?.handler_id
 
+  // F6: Require payment credentials to prevent completing checkout without paying
+  if (!eip3009Authorization) {
+    res.status(400).json(formatAcpError({
+      type: "invalid_request",
+      code: "missing_payment_data",
+      message: "Payment data with valid instrument credentials is required to complete checkout.",
+      httpStatus: 400,
+    }))
+    return
+  }
+
   try {
     const { result } = await completeCheckoutSessionWorkflow(req.scope).run({
       input: {

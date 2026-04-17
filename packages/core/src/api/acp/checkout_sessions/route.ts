@@ -4,6 +4,7 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
 import { acpAddressToMedusa } from "../../../lib/address-translator"
 import { formatAcpError, httpStatusToAcpType } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
+import { computeSessionFingerprint } from "../../../lib/session-ownership"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
@@ -34,6 +35,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         protocol: "acp",
         agent_identifier: agentIdentifier,
         protocol_version: protocolVersion,
+        session_fingerprint: computeSessionFingerprint(req),
       } as any,
     })
 

@@ -15,6 +15,7 @@ import {
 import { createIdempotencyMiddleware } from "./middleware/idempotency"
 import { formatAcpError } from "../lib/error-formatters"
 import { formatUcpError } from "../lib/error-formatters"
+import { computeSessionFingerprint, verifySessionOwnership } from "../lib/session-ownership"
 
 // Supported ACP API versions
 const SUPPORTED_ACP_VERSIONS = ["2026-01-30"]
@@ -152,6 +153,63 @@ async function validateUcpRequest(
   next()
 }
 
+// --- Session Ownership Middleware ---
+// Verifies that the caller's fingerprint matches the session creator's fingerprint.
+// Prevents agent A from modifying agent B's checkout session.
+
+async function verifySessionOwner(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction
+) {
+  const { id } = req.params
+  if (!id) {
+    next()
+    return
+  }
+
+  try {
+    const query = req.scope.resolve("query") as any
+    const { data: [cart] } = await query.graph({
+      entity: "cart",
+      fields: ["id", "metadata"],
+      filters: { id },
+    })
+
+    if (!cart) {
+      // Let the route handler deal with 404
+      next()
+      return
+    }
+
+    const fingerprint = computeSessionFingerprint(req)
+    if (!verifySessionOwnership(cart.metadata, fingerprint)) {
+      // Determine protocol from path for error formatting
+      const isAcp = req.path.startsWith("/acp")
+      if (isAcp) {
+        res.status(403).json(formatAcpError({
+          type: "invalid_request",
+          code: "session_ownership_mismatch",
+          message: "You do not have permission to modify this checkout session",
+          httpStatus: 403,
+        }))
+      } else {
+        res.status(403).json(formatUcpError({
+          ucpVersion: UCP_VERSION,
+          code: "session_ownership_mismatch",
+          content: "You do not have permission to modify this checkout session",
+        }))
+      }
+      return
+    }
+  } catch {
+    // If we can't verify ownership, allow the request through
+    // (the route handler will deal with invalid IDs)
+  }
+
+  next()
+}
+
 // --- Adapter Resolution Middleware ---
 // Resolves payment handler adapters from the request-scoped container.
 // Must run before any route that accesses payment handlers.
@@ -260,6 +318,20 @@ export default defineMiddlewares({
       middlewares: [validateAcpRequest, resolvePaymentAdapters, acpRequestId],
     },
 
+    // --- ACP Session Ownership ---
+    {
+      matcher: "/acp/checkout_sessions/:id",
+      middlewares: [verifySessionOwner],
+    },
+    {
+      matcher: "/acp/checkout_sessions/:id/complete",
+      middlewares: [verifySessionOwner],
+    },
+    {
+      matcher: "/acp/checkout_sessions/:id/cancel",
+      middlewares: [verifySessionOwner],
+    },
+
     // --- ACP Idempotency (required on all POSTs) ---
     {
       matcher: "/acp/checkout_sessions*",
@@ -300,6 +372,28 @@ export default defineMiddlewares({
     {
       matcher: "/ucp/orders*",
       middlewares: [validateUcpRequest, resolvePaymentAdapters],
+    },
+
+    // --- UCP Session Ownership ---
+    {
+      matcher: "/ucp/checkout-sessions/:id",
+      middlewares: [verifySessionOwner],
+    },
+    {
+      matcher: "/ucp/checkout-sessions/:id/complete",
+      middlewares: [verifySessionOwner],
+    },
+    {
+      matcher: "/ucp/checkout-sessions/:id/cancel",
+      middlewares: [verifySessionOwner],
+    },
+    {
+      matcher: "/ucp/carts/:id",
+      middlewares: [verifySessionOwner],
+    },
+    {
+      matcher: "/ucp/carts/:id/cancel",
+      middlewares: [verifySessionOwner],
     },
 
     // --- UCP Idempotency (required on POST/PUT) ---

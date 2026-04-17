@@ -3,6 +3,7 @@ import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-se
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
 import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
+import { computeSessionFingerprint } from "../../../lib/session-ownership"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -31,6 +32,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         protocol: "ucp",
         agent_identifier: agentIdentifier,
         protocol_version: UCP_VERSION,
+        session_fingerprint: computeSessionFingerprint(req),
       },
     })
 

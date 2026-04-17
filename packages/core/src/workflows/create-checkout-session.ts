@@ -24,6 +24,7 @@ type CreateCheckoutSessionInput = {
   protocol: "acp" | "ucp"
   agent_identifier?: string
   protocol_version?: string
+  session_fingerprint?: string
 }
 
 const createCheckoutSessionWorkflow = createWorkflow(
@@ -64,6 +65,7 @@ const createCheckoutSessionWorkflow = createWorkflow(
               .replace(/[\x00-\x1f\x7f]/g, "")
               .slice(0, 256),
             checkout_session_created_at: new Date().toISOString(),
+            session_fingerprint: input.session_fingerprint || null,
             ...(input.webhook_url ? { agent_webhook_url: input.webhook_url } : {}),
           },
           ...(address ? { shipping_address: address } : {}),

@@ -28,15 +28,19 @@ export type AcpAddress = {
   phone_number?: string
 }
 
+// Per spec postal_address.json:
+// - street_address, extended_address, address_locality, address_region,
+//   address_country, postal_code, first_name, last_name, phone_number
 export type UcpAddress = {
-  name?: string
-  line1?: string
-  line2?: string
-  city?: string
-  state?: string
+  first_name?: string
+  last_name?: string
+  street_address?: string
+  extended_address?: string
+  address_locality?: string
+  address_region?: string
+  address_country?: string
   postal_code?: string
-  country?: string
-  phone?: string
+  phone_number?: string
 }
 
 // --- Medusa <-> ACP ---
@@ -80,37 +84,29 @@ export function acpAddressToMedusa(addr: AcpAddress): MedusaAddress {
 // --- Medusa <-> UCP ---
 
 export function medusaToUcpAddress(addr: MedusaAddress): UcpAddress {
-  const nameParts = [addr.first_name, addr.last_name].filter(Boolean)
   return {
-    name: nameParts.length > 0 ? nameParts.join(" ") : undefined,
-    line1: addr.address_1 || undefined,
-    line2: addr.address_2 || undefined,
-    city: addr.city || undefined,
-    state: addr.province || undefined,
+    first_name: addr.first_name || undefined,
+    last_name: addr.last_name || undefined,
+    street_address: addr.address_1 || undefined,
+    extended_address: addr.address_2 || undefined,
+    address_locality: addr.city || undefined,
+    address_region: addr.province || undefined,
+    address_country: addr.country_code || undefined,
     postal_code: addr.postal_code || undefined,
-    country: addr.country_code || undefined,
-    phone: addr.phone || undefined,
+    phone_number: addr.phone || undefined,
   }
 }
 
 export function ucpAddressToMedusa(addr: UcpAddress): MedusaAddress {
-  let firstName: string | undefined
-  let lastName: string | undefined
-  if (addr.name) {
-    const parts = addr.name.trim().split(/\s+/)
-    firstName = parts[0]
-    lastName = parts.length > 1 ? parts.slice(1).join(" ") : undefined
-  }
-
   return {
-    first_name: firstName,
-    last_name: lastName,
-    address_1: addr.line1 || undefined,
-    address_2: addr.line2 || undefined,
-    city: addr.city || undefined,
-    province: addr.state || undefined,
+    first_name: addr.first_name || undefined,
+    last_name: addr.last_name || undefined,
+    address_1: addr.street_address || undefined,
+    address_2: addr.extended_address || undefined,
+    city: addr.address_locality || undefined,
+    province: addr.address_region || undefined,
     postal_code: addr.postal_code || undefined,
-    country_code: addr.country || undefined,
-    phone: addr.phone || undefined,
+    country_code: addr.address_country || undefined,
+    phone: addr.phone_number || undefined,
   }
 }

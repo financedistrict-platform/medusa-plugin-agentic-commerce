@@ -64,17 +64,21 @@ export async function validateWebhookUrl(url: string): Promise<{ valid: boolean;
     return { valid: true }
   }
 
-  // DNS resolution check — resolve hostname and verify it's not private
+  // DNS resolution check — resolve hostname and verify it's not private.
+  // We reject URLs that fail DNS resolution to prevent DNS rebinding attacks
+  // where an attacker's DNS server alternates between public and private IPs.
   try {
     const addresses = await dns.resolve4(hostname)
+    if (addresses.length === 0) {
+      return { valid: false, reason: "Hostname has no DNS records" }
+    }
     for (const ip of addresses) {
       if (isPrivateIp(ip)) {
         return { valid: false, reason: "Hostname resolves to a private IP address" }
       }
     }
   } catch {
-    // DNS resolution failed — allow the URL and let fetch handle it.
-    // This prevents DNS outages from blocking checkout creation.
+    return { valid: false, reason: "DNS resolution failed for hostname" }
   }
 
   return { valid: true }

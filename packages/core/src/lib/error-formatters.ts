@@ -38,7 +38,16 @@ export function httpStatusToAcpType(status: number): AcpErrorType {
 }
 
 // --- UCP Errors ---
-// Spec: { ucp: { version, status: "error" }, messages: [{ type: "error", code, content, severity }] }
+// Spec error_response.json:
+//   { ucp: { version, status: "error" }, messages: [message_error, ...] }
+// message_error.json required fields: type, code, content, severity
+//   severity enum: recoverable | requires_buyer_input | requires_buyer_review | unrecoverable
+
+export type UcpErrorSeverity =
+  | "recoverable"
+  | "requires_buyer_input"
+  | "requires_buyer_review"
+  | "unrecoverable"
 
 export type UcpErrorResponse = {
   ucp: {
@@ -49,7 +58,9 @@ export type UcpErrorResponse = {
     type: "error"
     code: string
     content: string
-    severity: string
+    severity: UcpErrorSeverity
+    path?: string
+    content_type?: "plain" | "markdown"
   }[]
 }
 
@@ -57,7 +68,8 @@ export function formatUcpError(params: {
   ucpVersion: string
   code: string
   content: string
-  severity?: string
+  severity?: UcpErrorSeverity
+  path?: string
 }): UcpErrorResponse {
   return {
     ucp: {
@@ -69,7 +81,8 @@ export function formatUcpError(params: {
         type: "error",
         code: params.code,
         content: params.content,
-        severity: params.severity || "error",
+        severity: params.severity || "unrecoverable",
+        ...(params.path ? { path: params.path } : {}),
       },
     ],
   }

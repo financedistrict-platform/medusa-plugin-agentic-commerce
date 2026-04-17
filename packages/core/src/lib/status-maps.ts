@@ -7,26 +7,35 @@
 // Spec values: incomplete, not_ready_for_payment, ready_for_payment, completed, canceled
 
 export function resolveAcpStatus(cart: any): string {
-  // Canceled (via metadata flag)
   if (cart.metadata?.checkout_session_canceled) return "canceled"
-  // Completed
   if (cart.completed_at) return "completed"
-  // Payment authorized -> still ready_for_payment in ACP terms
   if (cart.payment_collection?.status === "authorized") return "ready_for_payment"
-  // Has items + email + address -> ready (shipping method auto-added by complete flow if missing)
   if (cart.items?.length > 0 && cart.email && cart.shipping_address) return "ready_for_payment"
-  // Has items but missing requirements
   if (cart.items?.length > 0) return "not_ready_for_payment"
-  // Empty cart
   return "incomplete"
 }
 
 // --- UCP Status ---
-// Spec values: incomplete, ready_for_complete, completed, canceled
+// Spec values: incomplete, requires_escalation, ready_for_complete,
+//              complete_in_progress, completed, canceled
+//
+// Per spec: "Errors with 'requires_*' severity contribute to 'status:
+// requires_escalation'." So the resolver needs to know about any blocking
+// error messages produced by the session.
 
-export function resolveUcpStatus(cart: any): string {
+export type UcpStatus =
+  | "incomplete"
+  | "requires_escalation"
+  | "ready_for_complete"
+  | "complete_in_progress"
+  | "completed"
+  | "canceled"
+
+export function resolveUcpStatus(cart: any, opts?: { requiresEscalation?: boolean; completeInProgress?: boolean }): UcpStatus {
   if (cart.metadata?.checkout_session_canceled) return "canceled"
   if (cart.completed_at) return "completed"
+  if (opts?.completeInProgress) return "complete_in_progress"
+  if (opts?.requiresEscalation) return "requires_escalation"
   if (cart.payment_collection?.status === "authorized") return "ready_for_complete"
   // Require items + email + shipping_address. The complete endpoint auto-attaches
   // a shipping method if none is present, so we don't require shipping_methods here.

@@ -2,6 +2,20 @@ import { describe, it, expect } from "vitest"
 import { resolveUcpStatus, resolveAcpStatus, resolveMissingRequirements } from "../lib/status-maps"
 
 describe("resolveUcpStatus", () => {
+  it("returns 'requires_escalation' when opts flag is set", () => {
+    expect(resolveUcpStatus({
+      items: [{ id: "i1" }],
+      email: "test@example.com",
+      shipping_address: { address_1: "x" },
+    }, { requiresEscalation: true })).toBe("requires_escalation")
+  })
+
+  it("returns 'complete_in_progress' when opts flag is set", () => {
+    expect(resolveUcpStatus({
+      items: [{ id: "i1" }],
+    }, { completeInProgress: true })).toBe("complete_in_progress")
+  })
+
   it("returns 'canceled' when metadata flag is set", () => {
     expect(resolveUcpStatus({ metadata: { checkout_session_canceled: true } })).toBe("canceled")
   })

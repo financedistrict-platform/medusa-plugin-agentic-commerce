@@ -4,6 +4,7 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
 import { ucpAddressToMedusa } from "../../../lib/address-translator"
 import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
+import { computeSessionFingerprint } from "../../../lib/session-ownership"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -19,9 +20,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     const email = body.buyer?.email
     const shippingAddress = body.shipping_address
-      ? ucpAddressToMedusa(body.shipping_address)
+      ? {
+          ...ucpAddressToMedusa(body.shipping_address),
+          // Buyer name fields also populate the shipping address name
+          ...(body.buyer?.first_name ? { first_name: body.buyer.first_name } : {}),
+          ...(body.buyer?.last_name ? { last_name: body.buyer.last_name } : {}),
+          ...(body.buyer?.phone_number ? { phone: body.buyer.phone_number } : {}),
+        }
       : undefined
-    const regionId = body.context?.region
+    const regionId = body.context?.region_id
     const currencyCode = body.context?.currency
 
     const agentIdentifier = req.headers["ucp-agent"] as string | undefined
@@ -36,6 +43,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         protocol: "ucp",
         agent_identifier: agentIdentifier,
         protocol_version: UCP_VERSION,
+        session_fingerprint: computeSessionFingerprint(req),
       } as any,
     })
 
