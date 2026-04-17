@@ -1,6 +1,6 @@
 {
   "name": "@financedistrict/medusa-plugin-agentic-commerce",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Agentic commerce plugin for Medusa v2 — adds UCP and ACP protocol support, enabling AI agents to browse, checkout, and pay at any Medusa storefront.",
   "author": "Finance District <dev@fd.xyz>",
   "license": "MIT",

@@ -67,7 +67,33 @@ describe("resolveUcpStatus", () => {
   })
 })
 
-describe("resolveAcpStatus", () => {
+describe("resolveAcpStatus — all spec status values", () => {
+  it("returns 'expired' when opts flag is set", () => {
+    expect(resolveAcpStatus({}, { expired: true })).toBe("expired")
+  })
+
+  it("returns 'complete_in_progress' when opts flag is set", () => {
+    expect(resolveAcpStatus({ items: [{ id: "i1" }] }, { completeInProgress: true })).toBe("complete_in_progress")
+  })
+
+  it("returns 'pending_approval' when opts flag is set", () => {
+    expect(resolveAcpStatus({ items: [{ id: "i1" }] }, { pendingApproval: true })).toBe("pending_approval")
+  })
+
+  it("returns 'authentication_required' when opts flag is set", () => {
+    expect(resolveAcpStatus({ items: [{ id: "i1" }] }, { authenticationRequired: true })).toBe("authentication_required")
+  })
+
+  it("returns 'requires_escalation' when opts flag is set", () => {
+    expect(resolveAcpStatus({ items: [{ id: "i1" }] }, { requiresEscalation: true })).toBe("requires_escalation")
+  })
+
+  it("returns 'in_progress' when opts flag is set", () => {
+    expect(resolveAcpStatus({ items: [{ id: "i1" }] }, { inProgress: true })).toBe("in_progress")
+  })
+})
+
+describe("resolveAcpStatus — default resolution", () => {
   it("returns 'canceled' when metadata flag is set", () => {
     expect(resolveAcpStatus({ metadata: { checkout_session_canceled: true } })).toBe("canceled")
   })

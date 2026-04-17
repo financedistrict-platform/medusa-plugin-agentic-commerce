@@ -15,16 +15,71 @@ const MedusaAddressSchema = z.object({
   phone: z.string().optional(),
 })
 
-// ACP address format (protocol-facing)
+// ACP Address — per schema.agentic_checkout.json (2026-01-30)
+// Required: name, line_one, city, state, country, postal_code
+// additionalProperties: false (no phone_number — that lives on FulfillmentDetails)
 const AcpAddressSchema = z.object({
-  name: z.string().optional(),
+  name: z.string(),
   line_one: z.string(),
   line_two: z.string().optional(),
   city: z.string(),
-  state: z.string().optional(),
+  state: z.string(),
+  country: z.string().length(2), // ISO 3166-1 alpha-2
   postal_code: z.string(),
-  country: z.string().min(2).max(2),
+})
+
+// ACP FulfillmentDetails — per spec
+// Required: address. Optional: name, email, phone_number.
+const AcpFulfillmentDetailsSchema = z.object({
+  name: z.string().optional(),
+  email: z.string().email().optional(),
   phone_number: z.string().optional(),
+  address: AcpAddressSchema,
+})
+
+// ACP Buyer — per spec schema.agentic_checkout.json
+// Required: email
+const AcpBuyerSchema = z.object({
+  email: z.string().email(),
+  first_name: z.string().optional(),
+  last_name: z.string().optional(),
+  full_name: z.string().optional(),
+  phone_number: z.string().optional(),
+  customer_id: z.string().optional(),
+  account_type: z.enum(["guest", "registered", "business"]).optional(),
+  authentication_status: z.enum(["authenticated", "guest", "requires_signin"]).optional(),
+})
+
+// ACP Item (request) — per spec: { id (required), name?, unit_amount? }
+// Note: quantity is NOT on Item per spec — duplicates in line_items[] imply quantity.
+// For merchant convenience we also accept a non-spec `quantity` which, when present,
+// is used directly; otherwise we aggregate by id.
+const AcpItemSchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  unit_amount: z.number().int().optional(),
+  // Non-spec convenience field — accepted for backward compat
+  quantity: z.number().int().positive().optional(),
+})
+
+// ACP Capabilities (request) — required on create per spec
+const AcpCapabilitiesSchema = z.object({
+  payment: z.object({
+    handlers: z.array(z.any()).optional(),
+  }).optional(),
+  interventions: z.any().optional(),
+  extensions: z.any().optional(),
+})
+
+// ACP SelectedFulfillmentOption — per spec
+const AcpSelectedFulfillmentOptionSchema = z.object({
+  fulfillment_option_id: z.string(),
+  fulfillment_group_id: z.string().optional(),
+})
+
+// ACP DiscountsRequest — per spec
+const AcpDiscountsRequestSchema = z.object({
+  codes: z.array(z.string()).optional(),
 })
 
 // UCP address format — per spec postal_address.json
@@ -51,71 +106,65 @@ const UcpBuyerSchema = z.object({
 // --- ACP schemas ---
 // ACP uses items[].id (not variant_id), fulfillment_details (not fulfillment_address)
 
+// ACP CheckoutSessionCreateRequest — per spec
+// Required: line_items, currency, capabilities
+// additionalProperties: false in spec — we keep it tolerant but don't accept non-spec fields here.
 export const CreateAcpCheckoutSessionSchema = z.object({
-  items: z.array(z.object({
-    id: z.string(),
-    quantity: z.number().int().positive(),
-  })).min(1),
-  region_id: z.string().optional(),
-  currency_code: z.string().optional(),
-  buyer: z.object({
-    email: z.string().email(),
-    first_name: z.string().optional(),
-    last_name: z.string().optional(),
-    phone_number: z.string().optional(),
-  }).optional(),
-  fulfillment_details: z.object({
-    name: z.string().optional(),
-    email: z.string().email().optional(),
-    phone_number: z.string().optional(),
-    address: AcpAddressSchema,
-  }).optional(),
-  webhook_url: z.string().url().optional(),
+  line_items: z.array(AcpItemSchema).min(1),
+  currency: z.string(),
+  capabilities: AcpCapabilitiesSchema,
+  buyer: AcpBuyerSchema.optional(),
+  fulfillment_details: AcpFulfillmentDetailsSchema.optional(),
+  fulfillment_groups: z.array(z.any()).optional(),
+  affiliate_attribution: z.any().optional(),
+  coupons: z.array(z.string()).optional(), // deprecated per spec
+  discounts: AcpDiscountsRequestSchema.optional(),
+  locale: z.string().optional(),
+  timezone: z.string().optional(),
+  quote_id: z.string().optional(),
+  metadata: z.record(z.any()).optional(),
 })
 
+// ACP CheckoutSessionUpdateRequest — per spec
+// All fields optional.
 export const UpdateAcpCheckoutSessionSchema = z.object({
-  items: z.array(z.object({
-    id: z.string(),
-    quantity: z.number().int().positive(),
-  })).optional(),
-  buyer: z.object({
-    email: z.string().email().optional(),
-    first_name: z.string().optional(),
-    last_name: z.string().optional(),
-  }).optional(),
-  fulfillment_details: z.object({
-    name: z.string().optional(),
-    address: AcpAddressSchema,
-  }).optional(),
-  fulfillment_option_id: z.string().optional(),
+  buyer: AcpBuyerSchema.partial().optional(),
+  line_items: z.array(AcpItemSchema).optional(),
+  fulfillment_details: AcpFulfillmentDetailsSchema.optional(),
+  fulfillment_groups: z.array(z.any()).optional(),
+  selected_fulfillment_options: z.array(AcpSelectedFulfillmentOptionSchema).optional(),
+  coupons: z.array(z.string()).optional(),
+  discounts: AcpDiscountsRequestSchema.optional(),
 })
 
-/**
- * ACP complete checkout schema.
- * Instrument type is handler-defined — we accept "eip3009_authorization" for Prism.
- * The credential contains the base64-encoded x402 PaymentAuthorizationResult.
- */
+// ACP CheckoutSessionCompleteRequest — per spec
+// Required: payment_data
+// payment_data.anyOf: { handler_id + instrument } OR { purchase_order_number }
+// PaymentData.instrument.credential requires { type, token }.
+// Billing address lives INSIDE payment_data per spec (not at top level).
 export const CompleteAcpCheckoutSessionSchema = z.object({
   payment_data: z.object({
     handler_id: z.string().optional(),
     instrument: z.object({
-      type: z.string().optional(), // "eip3009_authorization" for Prism
+      type: z.string(),
       credential: z.object({
-        /** Base64-encoded x402 PaymentAuthorizationResult JSON */
-        authorization: z.string().optional(),
-        /** x402 protocol version (1 or 2) */
-        x402_version: z.number().int().optional(),
-        /** @deprecated Use authorization field. Kept for backwards compat. */
+        type: z.string(),
         token: z.string().optional(),
-      }).optional(),
+        // Handler-specific extension fields (for x402/Prism etc.)
+        authorization: z.string().optional(),
+        x402_version: z.number().int().optional(),
+      }).passthrough(),
     }).optional(),
-  }).optional(),
-  buyer: z.object({
-    email: z.string().email().optional(),
-    first_name: z.string().optional(),
-    last_name: z.string().optional(),
-  }).optional(),
-  billing_address: AcpAddressSchema.optional(),
+    billing_address: AcpAddressSchema.optional(),
+    purchase_order_number: z.string().optional(),
+    payment_terms: z.enum(["immediate", "net_15", "net_30", "net_60", "net_90"]).optional(),
+    due_date: z.string().datetime().optional(),
+    approval_required: z.boolean().optional(),
+  }),
+  buyer: AcpBuyerSchema.partial().optional(),
+  authentication_result: z.any().optional(),
+  affiliate_attribution: z.any().optional(),
+  risk_signals: z.any().optional(),
 })
 
 // --- UCP schemas ---

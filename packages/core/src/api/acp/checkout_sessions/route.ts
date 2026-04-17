@@ -10,15 +10,28 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
     const body = req.validatedBody as any
 
-    // Translate ACP field names to internal Medusa format
-    const items = (body.items || []).map((i: any) => ({
-      variant_id: i.id,
-      quantity: i.quantity,
-    }))
+    // Translate ACP fields (line_items per spec) to internal Medusa format.
+    // Per spec Item has no quantity — duplicate entries imply quantity.
+    // For merchant convenience our schema also accepts a non-spec `quantity` field.
+    const itemCounts = new Map<string, { variant_id: string; quantity: number }>()
+    for (const it of (body.line_items || [])) {
+      const qty = typeof it.quantity === "number" && it.quantity > 0 ? it.quantity : 1
+      const existing = itemCounts.get(it.id)
+      if (existing) {
+        existing.quantity += qty
+      } else {
+        itemCounts.set(it.id, { variant_id: it.id, quantity: qty })
+      }
+    }
+    const items = Array.from(itemCounts.values())
 
     const email = body.buyer?.email
     const shippingAddress = body.fulfillment_details?.address
-      ? acpAddressToMedusa(body.fulfillment_details.address)
+      ? {
+          ...acpAddressToMedusa(body.fulfillment_details.address),
+          // phone_number now lives on FulfillmentDetails (not Address) per spec
+          ...(body.fulfillment_details.phone_number ? { phone: body.fulfillment_details.phone_number } : {}),
+        }
       : undefined
 
     const agentIdentifier = req.headers["user-agent"] as string | undefined
@@ -29,9 +42,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         items,
         email,
         shipping_address: shippingAddress,
-        webhook_url: body.webhook_url,
-        region_id: body.region_id,
-        currency_code: body.currency_code,
+        // Spec uses `currency`, not `currency_code`
+        currency_code: body.currency,
+        // metadata stores non-spec webhook_url if provided via metadata
+        metadata: body.metadata,
         protocol: "acp",
         agent_identifier: agentIdentifier,
         protocol_version: protocolVersion,

@@ -4,9 +4,15 @@
  */
 
 // --- ACP Errors ---
-// Spec: { type: "invalid_request"|"processing_error"|"service_unavailable", code, message, param? }
+// Spec (schema.agentic_checkout.json error types):
+//   invalid_request | request_not_idempotent | processing_error | service_unavailable
+// Shape: { type, code, message, param? }
 
-export type AcpErrorType = "invalid_request" | "processing_error" | "service_unavailable"
+export type AcpErrorType =
+  | "invalid_request"
+  | "request_not_idempotent"
+  | "processing_error"
+  | "service_unavailable"
 
 export type AcpErrorResponse = {
   type: AcpErrorType

@@ -17,15 +17,17 @@ export type MedusaAddress = {
   phone?: string
 }
 
+// Per ACP spec Address (2026-01-30):
+// Required: name, line_one, city, state, country, postal_code
+// NOTE: phone_number is NOT on Address — it's on FulfillmentDetails.
 export type AcpAddress = {
   name?: string
   line_one?: string
   line_two?: string
   city?: string
   state?: string
-  postal_code?: string
   country?: string
-  phone_number?: string
+  postal_code?: string
 }
 
 // Per spec postal_address.json:
@@ -53,9 +55,8 @@ export function medusaToAcpAddress(addr: MedusaAddress): AcpAddress {
     line_two: addr.address_2 || undefined,
     city: addr.city || undefined,
     state: addr.province || undefined,
-    postal_code: addr.postal_code || undefined,
     country: addr.country_code || undefined,
-    phone_number: addr.phone || undefined,
+    postal_code: addr.postal_code || undefined,
   }
 }
 
@@ -77,7 +78,6 @@ export function acpAddressToMedusa(addr: AcpAddress): MedusaAddress {
     province: addr.state || undefined,
     postal_code: addr.postal_code || undefined,
     country_code: addr.country || undefined,
-    phone: addr.phone_number || undefined,
   }
 }
 

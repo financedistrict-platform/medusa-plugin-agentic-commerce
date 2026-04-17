@@ -1,131 +1,258 @@
 /**
- * ACP Protocol Formatter
+ * ACP Protocol Formatter (Agentic Commerce Protocol, 2026-01-30)
  *
- * Transforms Medusa internal objects into ACP-compliant response shapes.
- * Spec: https://developers.fd.xyz/acp
+ * Spec: https://github.com/agentic-commerce-protocol/agentic-commerce-protocol
+ * Source: spec/2026-01-30/json-schema/schema.agentic_checkout.json
  */
 
 import { medusaToAcpAddress } from "../address-translator"
-import { resolveAcpStatus, resolveMissingRequirements } from "../status-maps"
+import { resolveAcpStatus, resolveMissingRequirements, type AcpStatus } from "../status-maps"
 import type { FormatterContext } from "./types"
 import { toMinor } from "./types"
 
 // =====================================================
-// Dynamic Messages
+// Spec-compliant Messages
 // =====================================================
+// Per spec schema.agentic_checkout.json message types are: info | warning | error.
+// All three require: type, content. Errors additionally require: code, severity.
+// severity enum: info | low | medium | high | critical
+// content_type: plain | markdown (NOT MIME)
+// param: JSONPath to the related field (e.g., $.line_items[0])
+//
+// Error codes (enum):
+//   missing, invalid, out_of_stock, payment_declined, requires_sign_in,
+//   requires_3ds, low_stock, quantity_exceeded, coupon_invalid, coupon_expired,
+//   minimum_not_met, maximum_exceeded, region_restricted, age_verification_required,
+//   approval_required, unsupported, not_found, conflict, rate_limited, expired,
+//   intervention_required
 
-type AcpMessage = {
-  type: "info" | "error"
-  content_type: "text/plain"
+type AcpMessageSeverity = "info" | "low" | "medium" | "high" | "critical"
+
+type AcpErrorMessage = {
+  type: "error"
+  code: string
   content: string
+  severity: AcpMessageSeverity
+  param?: string
+  content_type?: "plain" | "markdown"
 }
 
-function buildAcpCheckoutMessages(ctx: FormatterContext, cart: any, status: string): AcpMessage[] {
+type AcpWarningMessage = {
+  type: "warning"
+  code: string
+  content: string
+  severity: AcpMessageSeverity
+  param?: string
+  content_type?: "plain" | "markdown"
+}
+
+type AcpInfoMessage = {
+  type: "info"
+  content: string
+  severity?: AcpMessageSeverity
+  param?: string
+  content_type?: "plain" | "markdown"
+}
+
+type AcpMessage = AcpErrorMessage | AcpWarningMessage | AcpInfoMessage
+
+function buildAcpCheckoutMessages(ctx: FormatterContext, cart: any, status: AcpStatus): AcpMessage[] {
   const messages: AcpMessage[] = []
 
   if (status === "completed") {
-    messages.push({ type: "info", content_type: "text/plain", content: "Checkout completed successfully." })
+    messages.push({ type: "info", content: "Checkout completed successfully." })
     return messages
   }
 
   if (status === "canceled") {
-    messages.push({ type: "info", content_type: "text/plain", content: "This checkout session has been canceled." })
+    messages.push({ type: "info", content: "This checkout session has been canceled." })
+    return messages
+  }
+
+  if (status === "expired") {
+    messages.push({
+      type: "error",
+      code: "expired",
+      content: "Checkout session has expired. Create a new session.",
+      severity: "high",
+    })
     return messages
   }
 
   const missing = resolveMissingRequirements(cart)
 
   if (missing.includes("items")) {
-    messages.push({ type: "error", content_type: "text/plain", content: "Add at least one item to the checkout session." })
+    messages.push({
+      type: "error",
+      code: "missing",
+      content: "Add at least one item to the checkout session.",
+      severity: "high",
+      param: "$.line_items",
+    })
   }
   if (missing.includes("email")) {
-    messages.push({ type: "error", content_type: "text/plain", content: "Provide a buyer email via POST /checkout_sessions/{id} with buyer.email." })
+    messages.push({
+      type: "error",
+      code: "missing",
+      content: "Provide buyer.email via POST /checkout_sessions/{id}.",
+      severity: "high",
+      param: "$.buyer.email",
+    })
   }
   if (missing.includes("shipping_address")) {
-    messages.push({ type: "error", content_type: "text/plain", content: "Provide a fulfillment address via POST /checkout_sessions/{id} with fulfillment_details.address." })
+    messages.push({
+      type: "error",
+      code: "missing",
+      content: "Provide fulfillment_details.address via POST /checkout_sessions/{id}.",
+      severity: "high",
+      param: "$.fulfillment_details.address",
+    })
   }
 
   if (status === "ready_for_payment") {
-    messages.push({ type: "info", content_type: "text/plain", content: "Checkout is ready. POST /checkout_sessions/{id}/complete with payment_data." })
+    messages.push({
+      type: "info",
+      content: "Checkout is ready. POST /checkout_sessions/{id}/complete with payment_data.",
+    })
   } else if (missing.length === 0) {
-    messages.push({ type: "info", content_type: "text/plain", content: `Checkout session for ${ctx.storeName}.` })
+    messages.push({ type: "info", content: `Checkout session for ${ctx.storeName}.` })
   }
 
   return messages
 }
 
 // =====================================================
-// Checkout Session
+// Line Items & Totals
 // =====================================================
+// Per spec Item (in line_items[].item): { id (req), name, unit_amount }
+// Per spec LineItem: { id (req), item (req), quantity (req), totals (req), ... }
+// Per spec Total: { type (req: enum), display_text (req), amount (req) }
+// Spec total.type enum: items_base_amount, items_discount, subtotal, discount,
+//   fulfillment, tax, fee, gift_wrap, tip, store_credit, total
 
-export function formatAcpCheckoutSession(ctx: FormatterContext, cart: any, baseUrl: string) {
-  const currency = cart.currency_code || "eur"
-  const status = resolveAcpStatus(cart)
-
-  const lineItems = (cart.items || []).map((item: any) => {
+function formatLineItems(items: any[]) {
+  return items.map((item: any) => {
     const unitAmount = toMinor(item.unit_price ?? item.raw_unit_price?.value ?? 0)
     return {
       id: item.id,
       item: {
         id: item.variant_id || item.id,
-        title: item.title || item.product_title || "",
-        price: { amount: unitAmount, currency },
+        name: item.title || item.product_title || "",
+        unit_amount: unitAmount,
       },
       quantity: item.quantity,
-      name: item.title || item.product_title || "",
-      unit_amount: unitAmount,
-      availability_status: "available",
       totals: [
-        { type: "line_total", amount: unitAmount * item.quantity },
+        { type: "items_base_amount", display_text: "Item total", amount: unitAmount * item.quantity },
       ],
     }
   })
+}
 
-  const totals = [
-    { type: "subtotal", display_text: "Subtotal", amount: toMinor(cart.subtotal ?? cart.raw_subtotal?.value ?? 0) },
-    { type: "fulfillment", display_text: "Shipping", amount: toMinor(cart.shipping_total ?? cart.raw_shipping_total?.value ?? 0) },
-    { type: "tax", display_text: "Tax", amount: toMinor(cart.tax_total ?? cart.raw_tax_total?.value ?? 0) },
-    { type: "discount", display_text: "Discount", amount: toMinor(cart.discount_total ?? cart.raw_discount_total?.value ?? 0) },
-    { type: "total", display_text: "Total", amount: toMinor(cart.total ?? cart.raw_total?.value ?? 0) },
-  ]
+function formatTotals(cart: any) {
+  const totals: { type: string; display_text: string; amount: number }[] = []
+
+  totals.push({
+    type: "subtotal",
+    display_text: "Subtotal",
+    amount: toMinor(cart.subtotal ?? cart.raw_subtotal?.value ?? 0),
+  })
+
+  const shipping = toMinor(cart.shipping_total ?? cart.raw_shipping_total?.value ?? 0)
+  if (shipping > 0) totals.push({ type: "fulfillment", display_text: "Shipping", amount: shipping })
+
+  const tax = toMinor(cart.tax_total ?? cart.raw_tax_total?.value ?? 0)
+  if (tax > 0) totals.push({ type: "tax", display_text: "Tax", amount: tax })
+
+  const discount = toMinor(cart.discount_total ?? cart.raw_discount_total?.value ?? 0)
+  // Medusa stores discount as positive; ACP spec has no sign constraint on discount
+  // in Total (unlike UCP), but convention across the spec is negative.
+  if (discount > 0) totals.push({ type: "discount", display_text: "Discount", amount: -discount })
+
+  totals.push({
+    type: "total",
+    display_text: "Total",
+    amount: toMinor(cart.total ?? cart.raw_total?.value ?? 0),
+  })
+
+  return totals
+}
+
+// =====================================================
+// Checkout Session
+// =====================================================
+// Per spec CheckoutSession required fields:
+//   id, protocol, capabilities, status, currency, line_items,
+//   fulfillment_options, totals, messages, links
+
+export function formatAcpCheckoutSession(ctx: FormatterContext, cart: any, baseUrl: string) {
+  const currency = (cart.currency_code || "eur").toUpperCase()
+  const status = resolveAcpStatus(cart)
+
+  const createdAt = cart.created_at || cart.metadata?.checkout_session_created_at
+  const updatedAt = cart.updated_at
+  const expiresAt = createdAt
+    ? new Date(new Date(createdAt).getTime() + 6 * 60 * 60 * 1000).toISOString()
+    : undefined
 
   const fulfillmentDetails = cart.shipping_address
     ? {
-        name: [cart.shipping_address.first_name, cart.shipping_address.last_name].filter(Boolean).join(" ") || undefined,
+        name: [cart.shipping_address.first_name, cart.shipping_address.last_name]
+          .filter(Boolean).join(" ") || undefined,
         email: cart.email || undefined,
         phone_number: cart.shipping_address.phone || undefined,
         address: medusaToAcpAddress(cart.shipping_address),
       }
-    : null
+    : undefined
 
   const fulfillmentOptions = (cart.shipping_methods || []).map((sm: any) => ({
+    type: "shipping" as const,
     id: sm.id,
-    type: "shipping",
     title: sm.name || sm.shipping_option?.name || "Standard Shipping",
     totals: [
-      { type: "fulfillment", amount: toMinor(sm.amount ?? sm.raw_amount?.value ?? 0) },
+      {
+        type: "fulfillment",
+        display_text: sm.name || "Shipping",
+        amount: toMinor(sm.amount ?? sm.raw_amount?.value ?? 0),
+      },
     ],
   }))
 
-  return {
+  const buyer = cart.email
+    ? {
+        email: cart.email,
+        ...(cart.shipping_address?.first_name ? { first_name: cart.shipping_address.first_name } : {}),
+        ...(cart.shipping_address?.last_name ? { last_name: cart.shipping_address.last_name } : {}),
+        ...(cart.shipping_address?.phone ? { phone_number: cart.shipping_address.phone } : {}),
+      }
+    : undefined
+
+  const session: Record<string, unknown> = {
     id: cart.id,
-    status,
-    currency,
+    protocol: { version: ctx.acpVersion },
     capabilities: {
       payment: {
         handlers: ctx.paymentHandlers.getAcpCheckoutHandlers(cart.metadata),
       },
     },
-    line_items: lineItems,
-    totals,
-    fulfillment_details: fulfillmentDetails,
+    status,
+    currency,
+    line_items: formatLineItems(cart.items || []),
     fulfillment_options: fulfillmentOptions,
+    totals: formatTotals(cart),
     messages: buildAcpCheckoutMessages(ctx, cart, status),
     links: [
       { type: "terms_of_use", url: `${ctx.storefrontUrl}/terms` },
       { type: "privacy_policy", url: `${ctx.storefrontUrl}/privacy` },
     ],
   }
+
+  if (buyer) session.buyer = buyer
+  if (fulfillmentDetails) session.fulfillment_details = fulfillmentDetails
+  if (createdAt) session.created_at = new Date(createdAt).toISOString()
+  if (updatedAt) session.updated_at = new Date(updatedAt).toISOString()
+  if (expiresAt) session.expires_at = expiresAt
+
+  return session
 }
 
 // =====================================================
@@ -135,17 +262,21 @@ export function formatAcpCheckoutSession(ctx: FormatterContext, cart: any, baseU
 export function formatAcpCompleteResponse(
   ctx: FormatterContext, cart: any, baseUrl: string, orderId: string | null, cartId: string
 ) {
-  const session = formatAcpCheckoutSession(ctx, cart, baseUrl)
+  const session = formatAcpCheckoutSession(ctx, cart, baseUrl) as Record<string, unknown>
+  // Order object per spec: { id, checkout_session_id, permalink_url (all required),
+  //   order_number, status, estimated_delivery, confirmation, support }
   return {
     ...session,
     status: "completed",
-    order: orderId
+    ...(orderId
       ? {
-          id: orderId,
-          checkout_session_id: cartId,
-          permalink_url: `${ctx.storefrontUrl}/orders/${orderId}`,
+          order: {
+            id: orderId,
+            checkout_session_id: cartId,
+            permalink_url: `${ctx.storefrontUrl}/orders/${orderId}`,
+          },
         }
-      : null,
+      : {}),
   }
 }
 
@@ -154,7 +285,7 @@ export function formatAcpCompleteResponse(
 // =====================================================
 
 export function formatAcpOrder(ctx: FormatterContext, order: any, baseUrl: string) {
-  const currency = order.currency_code || "eur"
+  const currency = (order.currency_code || "eur").toUpperCase()
 
   const lineItems = (order.items || []).map((item: any) => {
     const unitAmount = toMinor(item.unit_price ?? item.raw_unit_price?.value ?? 0)
@@ -162,25 +293,15 @@ export function formatAcpOrder(ctx: FormatterContext, order: any, baseUrl: strin
       id: item.id,
       item: {
         id: item.variant_id || item.variant?.id || item.id,
-        title: item.title || item.product_title || "",
-        price: { amount: unitAmount, currency },
+        name: item.title || item.product_title || "",
+        unit_amount: unitAmount,
       },
       quantity: item.quantity,
-      name: item.title || item.product_title || "",
-      unit_amount: unitAmount,
       totals: [
-        { type: "line_total", amount: unitAmount * item.quantity },
+        { type: "items_base_amount", display_text: "Item total", amount: unitAmount * item.quantity },
       ],
     }
   })
-
-  const totals = [
-    { type: "subtotal", display_text: "Subtotal", amount: toMinor(order.subtotal ?? order.raw_subtotal?.value ?? 0) },
-    { type: "fulfillment", display_text: "Shipping", amount: toMinor(order.shipping_total ?? order.raw_shipping_total?.value ?? 0) },
-    { type: "tax", display_text: "Tax", amount: toMinor(order.tax_total ?? order.raw_tax_total?.value ?? 0) },
-    { type: "discount", display_text: "Discount", amount: toMinor(order.discount_total ?? order.raw_discount_total?.value ?? 0) },
-    { type: "total", display_text: "Total", amount: toMinor(order.total ?? order.raw_total?.value ?? 0) },
-  ]
 
   const fulfillmentEvents = (order.fulfillments || []).map((f: any) => ({
     type: f.shipped_at ? "shipped" : "created",
@@ -195,32 +316,31 @@ export function formatAcpOrder(ctx: FormatterContext, order: any, baseUrl: strin
 
   const fulfillmentDetails = order.shipping_address
     ? {
-        name: [order.shipping_address.first_name, order.shipping_address.last_name].filter(Boolean).join(" ") || undefined,
+        name: [order.shipping_address.first_name, order.shipping_address.last_name]
+          .filter(Boolean).join(" ") || undefined,
         email: order.email || undefined,
+        phone_number: order.shipping_address.phone || undefined,
         address: medusaToAcpAddress(order.shipping_address),
-        status: order.fulfillment_status || "not_fulfilled",
-        events: fulfillmentEvents,
       }
-    : null
+    : undefined
 
   return {
     id: order.id,
-    display_id: order.display_id || null,
+    protocol: { version: ctx.acpVersion },
+    order_number: order.display_id || null,
     checkout_session_id: order.cart_id || null,
     permalink_url: `${ctx.storefrontUrl}/orders/${order.id}`,
-    status: order.status || "pending",
+    status: order.status || "confirmed",
     currency,
-    email: order.email || null,
     line_items: lineItems,
     fulfillment_details: fulfillmentDetails,
-    totals,
+    fulfillment_events: fulfillmentEvents,
+    totals: formatTotals(order),
     created_at: order.created_at,
     updated_at: order.updated_at,
     messages: [
-      { type: "info", content_type: "text/plain", content: `Order ${order.display_id || order.id} from ${ctx.storeName}` },
+      { type: "info", content: `Order ${order.display_id || order.id} from ${ctx.storeName}.` },
     ],
-    links: [
-      { type: "self", url: `${baseUrl}/${order.id}` },
-    ],
+    links: [{ type: "self", url: `${baseUrl}/${order.id}` }],
   }
 }

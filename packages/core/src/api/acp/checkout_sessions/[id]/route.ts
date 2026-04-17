@@ -45,15 +45,30 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
     const body = req.validatedBody as any
 
-    // Translate ACP field names to internal format
-    const items = body.items
-      ? body.items.map((i: any) => ({ variant_id: i.id, quantity: i.quantity }))
-      : undefined
+    // Translate ACP line_items (spec Item: {id, name?, unit_amount?}; duplicates imply qty)
+    let items: any[] | undefined
+    if (body.line_items) {
+      const counts = new Map<string, { variant_id: string; quantity: number }>()
+      for (const it of body.line_items) {
+        const qty = typeof it.quantity === "number" && it.quantity > 0 ? it.quantity : 1
+        const existing = counts.get(it.id)
+        if (existing) existing.quantity += qty
+        else counts.set(it.id, { variant_id: it.id, quantity: qty })
+      }
+      items = Array.from(counts.values())
+    }
 
     const email = body.buyer?.email
     const shippingAddress = body.fulfillment_details?.address
-      ? acpAddressToMedusa(body.fulfillment_details.address)
+      ? {
+          ...acpAddressToMedusa(body.fulfillment_details.address),
+          ...(body.fulfillment_details.phone_number ? { phone: body.fulfillment_details.phone_number } : {}),
+        }
       : undefined
+
+    // Spec uses selected_fulfillment_options (array) rather than single fulfillment_option_id
+    const fulfillmentOptionId =
+      body.selected_fulfillment_options?.[0]?.fulfillment_option_id
 
     await updateCheckoutSessionWorkflow(req.scope).run({
       input: {
@@ -61,7 +76,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         items,
         email,
         shipping_address: shippingAddress,
-        fulfillment_option_id: body.fulfillment_option_id,
+        fulfillment_option_id: fulfillmentOptionId,
       } as any,
     })
 

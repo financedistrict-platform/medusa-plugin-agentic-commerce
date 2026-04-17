@@ -248,16 +248,99 @@ describe("UCP formatter — totals per spec", () => {
   })
 })
 
-describe("ACP formatter messages", () => {
-  it("emits error message for missing shipping address", () => {
+describe("ACP formatter — spec-compliant top-level structure", () => {
+  it("includes required fields per schema.agentic_checkout.json", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [{ id: "i1", quantity: 1, unit_price: 1000 }],
+      subtotal: 1000,
+      total: 1000,
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    // Required: id, protocol, capabilities, status, currency, line_items,
+    //           fulfillment_options, totals, messages, links
+    expect(session.id).toBe("cart_1")
+    expect(session.protocol).toEqual({ version: "2026-01-30" })
+    expect(session.capabilities).toBeDefined()
+    expect(session.capabilities.payment).toBeDefined()
+    expect(session.status).toBeDefined()
+    expect(session.currency).toBe("EUR")
+    expect(session.line_items).toBeDefined()
+    expect(session.fulfillment_options).toBeDefined()
+    expect(session.totals).toBeDefined()
+    expect(session.messages).toBeDefined()
+    expect(session.links).toBeDefined()
+  })
+
+  it("emits item shape per spec: { id, name, unit_amount }", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [{ id: "li_1", variant_id: "var_1", title: "T-shirt", unit_price: 1500, quantity: 2 }],
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    const li = session.line_items[0]
+    expect(li.id).toBe("li_1")
+    expect(li.item).toEqual({
+      id: "var_1",
+      name: "T-shirt",
+      unit_amount: 150000,
+    })
+    // Spec LineItem requires: id, item, quantity, totals
+    expect(li.quantity).toBe(2)
+    expect(li.totals).toBeDefined()
+  })
+
+  it("line_item totals use spec-allowed type (items_base_amount)", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [{ id: "li_1", unit_price: 1000, quantity: 1 }],
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    const total = session.line_items[0].totals[0]
+    expect(total.type).toBe("items_base_amount")
+    expect(total.display_text).toBeDefined()
+    expect(total.amount).toBeDefined()
+  })
+})
+
+describe("ACP formatter — spec-compliant messages", () => {
+  it("emits error with spec code 'missing' and severity enum for shipping", () => {
     const session = formatAcpCheckoutSession(ctx, {
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
     }, "https://api.test/acp/checkout_sessions") as any
 
-    const errorMsg = session.messages.find((m: any) => m.type === "error" && m.content.includes("fulfillment address"))
-    expect(errorMsg).toBeDefined()
+    const msg = session.messages.find((m: any) => m.param === "$.fulfillment_details.address")
+    expect(msg).toBeDefined()
+    expect(msg.type).toBe("error")
+    // Spec code enum: missing | invalid | out_of_stock | ...
+    expect(msg.code).toBe("missing")
+    // Spec severity enum: info | low | medium | high | critical
+    expect(["info", "low", "medium", "high", "critical"]).toContain(msg.severity)
+  })
+
+  it("does not emit non-spec content_type MIME values", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [],
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    for (const m of session.messages) {
+      if (m.content_type) {
+        expect(["plain", "markdown"]).toContain(m.content_type)
+      }
+    }
+  })
+
+  it("emits error with JSONPath param per spec", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [],
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    const missingItems = session.messages.find((m: any) => m.param === "$.line_items")
+    expect(missingItems).toBeDefined()
   })
 
   it("transitions to ready_for_payment with items + email + address", () => {
@@ -269,5 +352,30 @@ describe("ACP formatter messages", () => {
     }, "https://api.test/acp/checkout_sessions") as any
 
     expect(session.status).toBe("ready_for_payment")
+  })
+})
+
+describe("ACP formatter — spec address", () => {
+  it("emits address without non-spec phone_number field", () => {
+    const session = formatAcpCheckoutSession(ctx, {
+      id: "cart_1",
+      items: [{ id: "i1", quantity: 1 }],
+      email: "buyer@example.com",
+      shipping_address: {
+        first_name: "Jane",
+        last_name: "Doe",
+        address_1: "123 Main",
+        city: "SF",
+        province: "CA",
+        postal_code: "94105",
+        country_code: "US",
+        phone: "+15551234567",
+      },
+    }, "https://api.test/acp/checkout_sessions") as any
+
+    // Address must NOT include phone_number per spec
+    expect(session.fulfillment_details.address.phone_number).toBeUndefined()
+    // phone_number lives on FulfillmentDetails
+    expect(session.fulfillment_details.phone_number).toBe("+15551234567")
   })
 })

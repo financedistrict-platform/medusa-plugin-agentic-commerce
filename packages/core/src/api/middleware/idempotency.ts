@@ -87,7 +87,7 @@ export function createIdempotencyMiddleware(options: {
               type: "error",
               code: "idempotency_key_required",
               content: "Idempotency-Key header is required for mutating requests",
-              severity: "error",
+              severity: "unrecoverable",
             }],
           })
         }
@@ -120,7 +120,7 @@ export function createIdempotencyMiddleware(options: {
       if (cached.body_hash !== bodyHash) {
         if (options.protocol === "acp") {
           res.status(422).json({
-            type: "invalid_request",
+            type: "request_not_idempotent",
             code: "idempotency_conflict",
             message: "Idempotency-Key has already been used with a different request body",
           })
@@ -131,7 +131,7 @@ export function createIdempotencyMiddleware(options: {
               type: "error",
               code: "idempotency_conflict",
               content: "Idempotency-Key has already been used with a different request body",
-              severity: "error",
+              severity: "unrecoverable",
             }],
           })
         }
@@ -153,7 +153,7 @@ export function createIdempotencyMiddleware(options: {
               type: "error",
               code: "idempotency_in_flight",
               content: "A request with this Idempotency-Key is currently being processed",
-              severity: "error",
+              severity: "unrecoverable",
             }],
           })
         }

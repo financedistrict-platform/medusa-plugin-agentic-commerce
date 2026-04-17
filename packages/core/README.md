@@ -1,27 +1,16 @@
-<h1 align="center">@financedistrict/medusa-plugin-agentic-commerce</h1>
+# @financedistrict/medusa-plugin-agentic-commerce
 
-<p align="center">
-  Turn any Medusa v2 store into an AI-native storefront.<br />
-  Adds <strong>UCP</strong> and <strong>ACP</strong> protocol endpoints so AI agents can discover products, check out, pay, and track orders — all through standard HTTP APIs.
-</p>
+Make your Medusa v2 store shoppable by AI agents.
 
-<p align="center">
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#protocols">Protocols</a> &middot;
-  <a href="#api-reference">API Reference</a> &middot;
-  <a href="#payment-handlers">Payment Handlers</a> &middot;
-  <a href="#configuration">Configuration</a>
-</p>
+This plugin adds [UCP](https://ucp.dev/) and [ACP](https://github.com/agentic-commerce-protocol/agentic-commerce-protocol) protocol endpoints to your Medusa backend, so AI shopping agents can discover your products, create checkouts, and complete purchases — through standard HTTP APIs that require no frontend at all.
 
----
+## Why this matters
 
-## Why
+AI agents are becoming the next commerce channel. Just like merchants once added mobile apps alongside their websites, they'll soon need to serve autonomous agents that shop on behalf of consumers. But agents don't browse — they need structured APIs with standardized discovery, checkout flows, and payment settlement.
 
-AI agents are becoming a real commerce channel. They need machine-readable APIs to browse catalogs, fill carts, handle payments, and confirm orders — without scraping HTML or reverse-engineering checkout flows.
+**UCP** (Universal Commerce Protocol) and **ACP** (Agentic Commerce Protocol) are the emerging open standards for this. This plugin implements both as native Medusa v2 modules, so your store speaks the language agents understand — in minutes, with no custom code and no frontend changes.
 
-This plugin gives your Medusa store a **standards-compliant agent API** in minutes. No custom code, no frontend changes. And the **pluggable payment handler adapter system** means any payment method — stablecoins, cards, wallets — can be added without modifying the core plugin.
-
-## What You Get
+## What you get
 
 | Feature | Description |
 |---------|-------------|
@@ -339,10 +328,27 @@ import {
 } from "@financedistrict/medusa-plugin-agentic-commerce"
 ```
 
+## Protocol Compliance
+
+Types and formatters are audited against the official protocol specifications:
+
+- **UCP** [`2026-01-11`](https://github.com/Universal-Commerce-Protocol/ucp) — catalog, checkout, fulfillment, payment, order, discovery
+- **ACP** [`2026-01-30`](https://github.com/agentic-commerce-protocol/agentic-commerce-protocol/tree/main/spec/2026-01-30) — checkout sessions, delegate payment, capabilities
+
+## Versioning
+
+This package follows [semver](https://semver.org/). While pre-1.0:
+
+- **Protocol spec changes** → minor bump (e.g., 0.1.x → 0.2.0)
+- **Medusa compatibility changes** → patch bump (e.g., 0.1.0 → 0.1.1)
+- **Bug fixes** → patch bump
+
+The companion `@financedistrict/medusa-plugin-prism-payment` declares this package as a peer dependency with a `^` range (e.g., `^0.1.0`), so incompatible combinations are caught at install time.
+
 ## Requirements
 
 - **Medusa v2** (2.x)
-- **Node.js** 20+
+- **Node.js** >= 20
 - **PostgreSQL** (standard Medusa requirement)
 
 ## License
