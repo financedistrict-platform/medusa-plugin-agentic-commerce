@@ -4,6 +4,7 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../lib/cart-fields"
 import { acpAddressToMedusa } from "../../../../lib/address-translator"
 import { formatAcpError, httpStatusToAcpType } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
+import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -70,6 +71,30 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const fulfillmentOptionId =
       body.selected_fulfillment_options?.[0]?.fulfillment_option_id
 
+    // Region resolution: switch the cart's region if the address targets a
+    // country outside the current region, or return a spec-compliant error
+    // listing supported countries if no region covers it.
+    let regionId: string | undefined
+    if (shippingAddress?.country_code) {
+      const resolution = await resolveRegionForAddressUpdate(
+        req.scope,
+        id,
+        shippingAddress.country_code
+      )
+      if (!resolution.supported) {
+        res.status(400).json(formatAcpError({
+          type: "invalid_request",
+          code: "country_not_supported",
+          message: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${resolution.supportedCountries.join(", ") || "(none configured)"}.`,
+          param: "$.fulfillment_details.address.country",
+        }))
+        return
+      }
+      if (resolution.shouldSwitch) {
+        regionId = resolution.regionId
+      }
+    }
+
     await updateCheckoutSessionWorkflow(req.scope).run({
       input: {
         cart_id: id,
@@ -77,6 +102,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         email,
         shipping_address: shippingAddress,
         fulfillment_option_id: fulfillmentOptionId,
+        region_id: regionId,
       } as any,
     })
 

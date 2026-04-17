@@ -27,16 +27,22 @@ type UpdateCheckoutSessionInput = {
   fulfillment_address?: Record<string, unknown>
   buyer?: { email?: string; name?: string }
   fulfillment_option_id?: string
+  /**
+   * Switch the cart to this region before updating. Required when the incoming
+   * address targets a country that is not in the cart's current region.
+   * Resolved by the route handler via resolveRegionForAddressUpdate.
+   */
+  region_id?: string
 }
 
 const updateCheckoutSessionWorkflow = createWorkflow(
   "update-checkout-session",
   (input: UpdateCheckoutSessionInput) => {
-    // Step 1: Update cart properties (email, shipping address)
+    // Step 1: Update cart properties (email, shipping address, region)
     const hasCartUpdates = transform(input, (input) => {
       const email = input.buyer?.email || input.email
       const address = input.fulfillment_address || input.shipping_address
-      return !!(email || address)
+      return !!(email || address || input.region_id)
     })
 
     when(hasCartUpdates, (v) => v).then(() => {
@@ -46,6 +52,9 @@ const updateCheckoutSessionWorkflow = createWorkflow(
         const address = input.fulfillment_address || input.shipping_address
         if (email) data.email = email
         if (address) data.shipping_address = address
+        // Region switch must happen in the same update as the address so
+        // Medusa's region/country validation sees the new pairing atomically.
+        if (input.region_id) data.region_id = input.region_id
         return data
       })
       updateCartWorkflow.runAsStep({ input: updateData as any })

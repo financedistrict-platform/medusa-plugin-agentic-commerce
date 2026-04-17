@@ -5,6 +5,7 @@ import { ucpAddressToMedusa } from "../../../lib/address-translator"
 import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
+import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -28,8 +29,28 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
           ...(body.buyer?.phone_number ? { phone: body.buyer.phone_number } : {}),
         }
       : undefined
-    const regionId = body.context?.region_id
+    let regionId: string | undefined = body.context?.region_id
     const currencyCode = body.context?.currency
+
+    // If the agent supplied a shipping address, pick a region whose country
+    // list includes the target country. Prevents the cart from being created
+    // under a region that doesn't serve the destination and later rejecting
+    // the same address on update.
+    if (!regionId && shippingAddress?.country_code) {
+      const match = await findRegionForCountry(req.scope, shippingAddress.country_code)
+      if (!match) {
+        const supported = await getSupportedCountries(req.scope)
+        res.status(400).json(formatUcpError({
+          ucpVersion: UCP_VERSION,
+          code: "country_not_supported",
+          content: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${supported.join(", ") || "(none configured)"}.`,
+          severity: "recoverable",
+          path: "$.shipping_address.address_country",
+        }))
+        return
+      }
+      regionId = match.id
+    }
 
     const agentIdentifier = req.headers["ucp-agent"] as string | undefined
 
@@ -81,10 +102,21 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     res.status(201).json(session)
   } catch (error: any) {
+    const msg: string = error?.message || ""
+    if (/Country with code .* is not within region/i.test(msg)) {
+      res.status(400).json(formatUcpError({
+        ucpVersion: UCP_VERSION,
+        code: "country_not_supported",
+        content: msg,
+        severity: "recoverable",
+        path: "$.shipping_address.address_country",
+      }))
+      return
+    }
     res.status(500).json(formatUcpError({
       ucpVersion: UCP_VERSION,
       code: "internal_error",
-      content: error.message,
+      content: msg || "Internal error",
     }))
   }
 }

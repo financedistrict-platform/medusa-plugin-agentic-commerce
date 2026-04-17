@@ -82,7 +82,9 @@ const AcpDiscountsRequestSchema = z.object({
   codes: z.array(z.string()).optional(),
 })
 
-// UCP address format — per spec postal_address.json
+// UCP address format — per spec postal_address.json.
+// Spec explicitly allows alpha-2 (preferred), alpha-3, or full country name
+// for backward compatibility — we normalize to alpha-2 downstream.
 const UcpAddressSchema = z.object({
   first_name: z.string().optional(),
   last_name: z.string().optional(),

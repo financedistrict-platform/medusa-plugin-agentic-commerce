@@ -3,6 +3,8 @@
  * and protocol-specific formats (ACP, UCP).
  */
 
+import { normalizeCountryCode } from "./country-codes"
+
 // --- Types ---
 
 export type MedusaAddress = {
@@ -69,6 +71,10 @@ export function acpAddressToMedusa(addr: AcpAddress): MedusaAddress {
     lastName = parts.length > 1 ? parts.slice(1).join(" ") : undefined
   }
 
+  // Normalize country to ISO 3166-1 alpha-2 lowercase (Medusa requirement).
+  // Input may be alpha-2, alpha-3, or full name per UCP/ACP spec tolerance.
+  const country = normalizeCountryCode(addr.country) || undefined
+
   return {
     first_name: firstName,
     last_name: lastName,
@@ -77,7 +83,7 @@ export function acpAddressToMedusa(addr: AcpAddress): MedusaAddress {
     city: addr.city || undefined,
     province: addr.state || undefined,
     postal_code: addr.postal_code || undefined,
-    country_code: addr.country || undefined,
+    country_code: country,
   }
 }
 
@@ -98,6 +104,10 @@ export function medusaToUcpAddress(addr: MedusaAddress): UcpAddress {
 }
 
 export function ucpAddressToMedusa(addr: UcpAddress): MedusaAddress {
+  // Normalize country. UCP spec explicitly permits alpha-2, alpha-3, or full
+  // country name. Medusa internally requires alpha-2 lowercase.
+  const country = normalizeCountryCode(addr.address_country) || undefined
+
   return {
     first_name: addr.first_name || undefined,
     last_name: addr.last_name || undefined,
@@ -106,7 +116,7 @@ export function ucpAddressToMedusa(addr: UcpAddress): MedusaAddress {
     city: addr.address_locality || undefined,
     province: addr.address_region || undefined,
     postal_code: addr.postal_code || undefined,
-    country_code: addr.address_country || undefined,
+    country_code: country,
     phone: addr.phone_number || undefined,
   }
 }

@@ -4,6 +4,7 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../lib/cart-fields"
 import { ucpAddressToMedusa } from "../../../../lib/address-translator"
 import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
+import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -61,12 +62,39 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
       ? ucpAddressToMedusa(body.shipping_address)
       : undefined
 
+    // Region resolution: if the incoming address targets a country that is not
+    // in the cart's current region, look up a region that supports it and
+    // switch the cart to that region first. If no region supports it, emit a
+    // spec-compliant recoverable error listing the countries that would work.
+    let regionId: string | undefined
+    if (shippingAddress?.country_code) {
+      const resolution = await resolveRegionForAddressUpdate(
+        req.scope,
+        id,
+        shippingAddress.country_code
+      )
+      if (!resolution.supported) {
+        res.status(400).json(formatUcpError({
+          ucpVersion: UCP_VERSION,
+          code: "country_not_supported",
+          content: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${resolution.supportedCountries.join(", ") || "(none configured)"}.`,
+          severity: "recoverable",
+          path: "$.shipping_address.address_country",
+        }))
+        return
+      }
+      if (resolution.shouldSwitch) {
+        regionId = resolution.regionId
+      }
+    }
+
     await updateCheckoutSessionWorkflow(req.scope).run({
       input: {
         cart_id: id,
         items,
         email,
         shipping_address: shippingAddress,
+        region_id: regionId,
       } as any,
     })
 
@@ -110,10 +138,22 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
 
     res.json(session)
   } catch (error: any) {
+    // Translate well-known Medusa errors to spec-compliant UCP errors
+    const msg: string = error?.message || ""
+    if (/Country with code .* is not within region/i.test(msg)) {
+      res.status(400).json(formatUcpError({
+        ucpVersion: UCP_VERSION,
+        code: "country_not_supported",
+        content: msg,
+        severity: "recoverable",
+        path: "$.shipping_address.address_country",
+      }))
+      return
+    }
     res.status(500).json(formatUcpError({
       ucpVersion: UCP_VERSION,
       code: "internal_error",
-      content: error.message,
+      content: msg || "Internal error",
     }))
   }
 }
