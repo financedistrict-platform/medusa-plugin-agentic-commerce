@@ -90,17 +90,22 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       return
     }
 
-    // Extract on-chain settlement details from the payment session data
-    // (populated by the Prism provider during authorize + capture).
-    // See prism-payment service: prism_tx_id = facilitator transaction hash.
+    // Extract on-chain settlement details from the active payment session.
+    // We read PSP-agnostic keys (transaction_reference / transaction_status /
+    // transaction_network) that any blockchain-settling payment provider can
+    // populate. Falls back to the Prism-specific keys for older provider
+    // versions.
     const paymentSessions = (cart as any)?.payment_collection?.payment_sessions || []
     const activeSession = paymentSessions.find((s: any) =>
       s.status === "authorized" || s.status === "captured"
     ) || paymentSessions[0]
     const sessionData = activeSession?.data || {}
-    const prismTxId: string | null = sessionData.prism_tx_id || null
-    const prismStatus: string | null = sessionData.prism_status || null
-    const network: string | null = sessionData.network || null
+    const txReference: string | null =
+      sessionData.transaction_reference || sessionData.prism_tx_id || null
+    const txStatus: string | null =
+      sessionData.transaction_status || sessionData.prism_status || null
+    const txNetwork: string | null =
+      sessionData.transaction_network || sessionData.network || null
 
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/checkout-sessions`
     const session = agenticCommerceService.formatUcpCheckoutSession(cart || {}, baseUrl)
@@ -114,15 +119,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         permalink_url: `${agenticCommerceService.getStorefrontUrl()}/orders/${orderId}`,
         links: [{ type: "self", url: `${getPublicBaseUrl(req)}/ucp/orders/${orderId}` }],
         // Payment settlement details — surfaces the on-chain tx hash so agents
-        // can verify settlement without additional calls. Structure matches the
-        // pattern documented in Prism's UCP integration guide.
-        ...(prismTxId || prismStatus
+        // can verify settlement without additional calls. Provider-agnostic:
+        // any blockchain-settling handler that writes transaction_* keys to
+        // its payment session data will appear here.
+        ...(txReference || txStatus
           ? {
               payment: {
                 handler_id: handlerId || "prism_default",
-                status: prismStatus || "settled",
-                ...(prismTxId ? { transaction: prismTxId } : {}),
-                ...(network ? { network } : {}),
+                status: txStatus || "settled",
+                ...(txReference ? { transaction: txReference } : {}),
+                ...(txNetwork ? { network: txNetwork } : {}),
               },
             }
           : {}),

@@ -1,20 +1,10 @@
-<h1 align="center">@financedistrict/medusa-plugin-prism-payment</h1>
+# @financedistrict/medusa-plugin-prism-payment
 
-<p align="center">
-  x402 stablecoin payments for Medusa v2.<br />
-  AI agents pay with <strong>USDC</strong>, <strong>FDUSD</strong>, and other stablecoins via EIP-3009 authorizations — settled on Base through the <a href="https://fd.xyz">Prism Gateway</a>.
-</p>
+x402 stablecoin payments for Medusa v2.
 
-<p align="center">
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#how-it-works">How It Works</a> &middot;
-  <a href="#configuration">Configuration</a> &middot;
-  <a href="#api">API</a>
-</p>
+AI agents pay with **USDC**, **FDUSD**, and other stablecoins via EIP-3009 authorizations — settled on Base through the [Prism Gateway](https://developers.fd.xyz/prism).
 
----
-
-## What This Does
+## What this does
 
 This package provides two Medusa v2 modules:
 
@@ -245,6 +235,20 @@ import {
 } from "@financedistrict/medusa-plugin-prism-payment"
 ```
 
+## Protocol Compliance
+
+- **x402** [`2026-01-15`](https://x402.org) — HTTP-native machine-to-machine payments
+- **EIP-3009** — `transferWithAuthorization` for gasless signed stablecoin transfers
+
+## Versioning
+
+This package follows [semver](https://semver.org/). While pre-1.0:
+
+- **Protocol spec changes** → minor bump (e.g., 0.1.x → 0.2.0)
+- **Prism API changes** → patch bump (e.g., 0.1.0 → 0.1.1)
+
+Declares `@financedistrict/medusa-plugin-agentic-commerce` as a peer dependency with a `^` range, so incompatible combinations are caught at install time.
+
 ## Requirements
 
 - **Medusa v2** (2.x)
@@ -253,10 +257,4 @@ import {
 
 ## License
 
-MIT
-
----
-
-<p align="center">
-  Built by <a href="https://fd.xyz">Finance District</a>
-</p>
+MIT — Built by [Finance District](https://fd.xyz)

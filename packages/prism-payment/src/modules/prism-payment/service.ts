@@ -195,6 +195,16 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         return {
           data: {
             ...data,
+            // Generic on-chain transaction keys (PSP-agnostic).
+            // Every payment provider that settles on a blockchain should write
+            // these under the same names so the agentic-commerce core plugin
+            // can surface them in the UCP/ACP response without knowing which
+            // PSP was used. Keep the Prism-specific keys below for existing
+            // admin tooling.
+            transaction_reference: settleResult.facilitatorTransactionId,
+            transaction_status: settleResult.status,
+            transaction_network: network,
+            // Prism-specific keys (kept for backwards compatibility)
             prism_tx_id: settleResult.facilitatorTransactionId,
             prism_status: settleResult.status,
             settled_at: settleResult.acceptedAt,
@@ -263,6 +273,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       return {
         data: {
           ...data,
+          // Generic on-chain transaction keys (see authorizePayment for rationale)
+          transaction_reference: settleResult.facilitatorTransactionId,
+          transaction_status: settleResult.status,
+          // Prism-specific keys (kept for backwards compatibility)
           prism_tx_id: settleResult.facilitatorTransactionId,
           prism_status: settleResult.status,
           settled_at: settleResult.acceptedAt,

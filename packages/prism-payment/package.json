@@ -1,6 +1,6 @@
 {
   "name": "@financedistrict/medusa-plugin-prism-payment",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prism x402 stablecoin payment handler for Medusa agentic commerce — enables AI agents to pay with USDC, FDUSD, and other stablecoins via EIP-3009 authorizations.",
   "author": "Finance District <dev@fd.xyz>",
   "license": "MIT",

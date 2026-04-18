@@ -285,16 +285,21 @@ export function formatAcpCompleteResponse(
 ) {
   const session = formatAcpCheckoutSession(ctx, cart, baseUrl) as Record<string, unknown>
 
-  // Extract Prism on-chain settlement details from the payment session.
-  // Set by prism-payment provider during authorize (auto_capture) and capture.
+  // Extract on-chain settlement details from the active payment session.
+  // PSP-agnostic: reads transaction_reference / transaction_status /
+  // transaction_network that any blockchain-settling payment provider can
+  // populate. Falls back to Prism-specific keys for older provider versions.
   const paymentSessions = (cart as any)?.payment_collection?.payment_sessions || []
   const activeSession = paymentSessions.find((s: any) =>
     s.status === "authorized" || s.status === "captured"
   ) || paymentSessions[0]
   const sessionData = activeSession?.data || {}
-  const prismTxId: string | undefined = sessionData.prism_tx_id
-  const prismStatus: string | undefined = sessionData.prism_status
-  const network: string | undefined = sessionData.network
+  const txReference: string | undefined =
+    sessionData.transaction_reference || sessionData.prism_tx_id
+  const txStatus: string | undefined =
+    sessionData.transaction_status || sessionData.prism_status
+  const txNetwork: string | undefined =
+    sessionData.transaction_network || sessionData.network
 
   return {
     ...session,
@@ -305,12 +310,12 @@ export function formatAcpCompleteResponse(
             id: orderId,
             checkout_session_id: cartId,
             permalink_url: `${ctx.storefrontUrl}/orders/${orderId}`,
-            ...(prismTxId || prismStatus
+            ...(txReference || txStatus
               ? {
                   payment: {
-                    status: prismStatus || "settled",
-                    ...(prismTxId ? { transaction: prismTxId } : {}),
-                    ...(network ? { network } : {}),
+                    status: txStatus || "settled",
+                    ...(txReference ? { transaction: txReference } : {}),
+                    ...(txNetwork ? { network: txNetwork } : {}),
                   },
                 }
               : {}),
