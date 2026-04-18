@@ -284,8 +284,18 @@ export function formatAcpCompleteResponse(
   ctx: FormatterContext, cart: any, baseUrl: string, orderId: string | null, cartId: string
 ) {
   const session = formatAcpCheckoutSession(ctx, cart, baseUrl) as Record<string, unknown>
-  // Order object per spec: { id, checkout_session_id, permalink_url (all required),
-  //   order_number, status, estimated_delivery, confirmation, support }
+
+  // Extract Prism on-chain settlement details from the payment session.
+  // Set by prism-payment provider during authorize (auto_capture) and capture.
+  const paymentSessions = (cart as any)?.payment_collection?.payment_sessions || []
+  const activeSession = paymentSessions.find((s: any) =>
+    s.status === "authorized" || s.status === "captured"
+  ) || paymentSessions[0]
+  const sessionData = activeSession?.data || {}
+  const prismTxId: string | undefined = sessionData.prism_tx_id
+  const prismStatus: string | undefined = sessionData.prism_status
+  const network: string | undefined = sessionData.network
+
   return {
     ...session,
     status: "completed",
@@ -295,6 +305,15 @@ export function formatAcpCompleteResponse(
             id: orderId,
             checkout_session_id: cartId,
             permalink_url: `${ctx.storefrontUrl}/orders/${orderId}`,
+            ...(prismTxId || prismStatus
+              ? {
+                  payment: {
+                    status: prismStatus || "settled",
+                    ...(prismTxId ? { transaction: prismTxId } : {}),
+                    ...(network ? { network } : {}),
+                  },
+                }
+              : {}),
           },
         }
       : {}),

@@ -23,6 +23,8 @@ export const CHECKOUT_SESSION_CART_FIELDS = [
   "shipping_methods.*",
   "payment_collection.*",
   "payment_collection.payment_sessions.*",
+  "payment_collection.payments.*",
+  "payment_collection.payments.captures.*",
   // Cart-to-order link — used by the complete route to confirm order creation
   "order.id",
   "order.display_id",
