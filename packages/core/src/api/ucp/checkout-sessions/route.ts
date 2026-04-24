@@ -6,6 +6,7 @@ import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
 import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
+import { listShippingOptionsSafe } from "../../../lib/list-shipping-options"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -95,9 +96,11 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       filters: { id: cart.id },
     })
 
+    const shippingOptions = await listShippingOptionsSafe(req.scope, cart.id)
     const session = agenticCommerceService.formatUcpCheckoutSession(
       cartWithPayment || fullCart,
-      checkoutBaseUrl
+      checkoutBaseUrl,
+      shippingOptions
     )
 
     res.status(201).json(session)

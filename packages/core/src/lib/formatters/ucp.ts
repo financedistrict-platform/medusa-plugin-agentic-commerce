@@ -9,6 +9,7 @@ import { medusaToUcpAddress } from "../address-translator"
 import { resolveUcpStatus, resolveMissingRequirements, type UcpStatus } from "../status-maps"
 import type { FormatterContext } from "./types"
 import { toMinor } from "./types"
+import { buildUcpFulfillment } from "./ucp-fulfillment"
 
 // =====================================================
 // Spec-compliant Messages
@@ -140,6 +141,9 @@ function ucpEnvelope(ctx: FormatterContext, includePayment: boolean, cartMetadat
       "dev.ucp.shopping.checkout": [{ version: ctx.ucpVersion }],
       "dev.ucp.shopping.cart": [{ version: ctx.ucpVersion }],
       "dev.ucp.shopping.order": [{ version: ctx.ucpVersion }],
+      // Fulfillment Extension — extends checkout with methods/destinations/groups.
+      // Spec: https://ucp.dev/specification/fulfillment/
+      "dev.ucp.shopping.fulfillment": [{ version: ctx.ucpVersion }],
     },
   }
   if (includePayment) {
@@ -240,7 +244,12 @@ function formatTotals(cart: any) {
 // Checkout Session
 // =====================================================
 
-export function formatUcpCheckoutSession(ctx: FormatterContext, cart: any, baseUrl: string) {
+export function formatUcpCheckoutSession(
+  ctx: FormatterContext,
+  cart: any,
+  baseUrl: string,
+  shippingOptions?: any[]
+) {
   const currency = (cart.currency_code || "eur").toUpperCase()
   const status = resolveUcpStatus(cart)
 
@@ -274,12 +283,19 @@ export function formatUcpCheckoutSession(ctx: FormatterContext, cart: any, baseU
     }
   }
 
-  // Optional shipping_address per spec postal_address.json (additionalProperties: true
-  // on checkout lets us attach it; fulfillment options surfaced in a non-standard field
-  // is avoided — agents set address via PUT, then session transitions)
+  // Optional shipping_address per spec postal_address.json.
+  // The richer fulfillment.methods[].destinations[] structure is the
+  // primary surface for address data per the Fulfillment Extension spec,
+  // but we keep shipping_address at the top level for convenience.
   if (cart.shipping_address) {
     session.shipping_address = medusaToUcpAddress(cart.shipping_address)
   }
+
+  // Fulfillment Extension — per spec, checkout gets a `fulfillment` field
+  // containing methods → destinations → groups → options.
+  // Spec: https://ucp.dev/schemas/shopping/fulfillment.json
+  const fulfillment = buildUcpFulfillment(cart, shippingOptions)
+  if (fulfillment) session.fulfillment = fulfillment
 
   if (expiresAt) session.expires_at = expiresAt
 

@@ -176,8 +176,8 @@ export default class AgenticCommerceService {
     return acpFormatter.formatAcpOrder(this.ctx, order, baseUrl)
   }
 
-  formatUcpCheckoutSession(cart: any, baseUrl: string) {
-    return ucpFormatter.formatUcpCheckoutSession(this.ctx, cart, baseUrl)
+  formatUcpCheckoutSession(cart: any, baseUrl: string, shippingOptions?: any[]) {
+    return ucpFormatter.formatUcpCheckoutSession(this.ctx, cart, baseUrl, shippingOptions)
   }
 
   formatUcpCart(cart: any, baseUrl: string) {
