@@ -6,7 +6,7 @@ Gateway: https://prism-gw.test.1stdigital.tech
 **Assumptions (PoS config):**
 - Supported assets: FDUSD, USDC, EURC
 - Multiple chains enabled
-- Amount: 1500 (minor units)
+- Amount: 15.00 (standard units)
 
 ## Matrix
 

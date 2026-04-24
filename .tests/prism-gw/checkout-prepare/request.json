@@ -1,5 +1,5 @@
 {
-  "amount": "1500",
+  "amount": "15.00",
   "currency": "USD",
   "resource": {
     "url": "https://store.example.com/checkout/test-session-001",
