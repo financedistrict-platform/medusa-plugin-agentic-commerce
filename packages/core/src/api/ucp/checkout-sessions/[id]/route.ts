@@ -5,6 +5,8 @@ import { ucpAddressToMedusa } from "../../../../lib/address-translator"
 import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
+import { listShippingOptionsSafe } from "../../../../lib/list-shipping-options"
+import { extractSelectedFulfillmentOptionId } from "../../../../lib/formatters/ucp-fulfillment"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -30,7 +32,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/checkout-sessions`
-    const session = agenticCommerceService.formatUcpCheckoutSession(cart, baseUrl)
+    const shippingOptions = await listShippingOptionsSafe(req.scope, id)
+    const session = agenticCommerceService.formatUcpCheckoutSession(cart, baseUrl, shippingOptions)
 
     res.json(session)
   } catch (error: any) {
@@ -61,6 +64,13 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     const shippingAddress = body.shipping_address
       ? ucpAddressToMedusa(body.shipping_address)
       : undefined
+
+    // UCP Fulfillment Extension: agent selects a shipping option by setting
+    // `selected_option_id` on a group inside body.fulfillment.methods[].groups[].
+    // We extract that here and pass it as fulfillment_option_id into the
+    // update workflow (which is already wired to apply it as a Medusa
+    // shipping method).
+    const fulfillmentOptionId = extractSelectedFulfillmentOptionId(body.fulfillment)
 
     // Region resolution: if the incoming address targets a country that is not
     // in the cart's current region, look up a region that supports it and
@@ -95,6 +105,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
         email,
         shipping_address: shippingAddress,
         region_id: regionId,
+        fulfillment_option_id: fulfillmentOptionId,
       } as any,
     })
 
@@ -134,7 +145,12 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
       filters: { id },
     })
 
-    const session = agenticCommerceService.formatUcpCheckoutSession(updatedCart || cart, baseUrl)
+    const shippingOptions = await listShippingOptionsSafe(req.scope, id)
+    const session = agenticCommerceService.formatUcpCheckoutSession(
+      updatedCart || cart,
+      baseUrl,
+      shippingOptions
+    )
 
     res.json(session)
   } catch (error: any) {

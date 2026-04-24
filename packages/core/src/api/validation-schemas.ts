@@ -188,6 +188,27 @@ export const CreateUcpCheckoutSessionSchema = z.object({
   shipping_address: UcpAddressSchema.optional(),
 })
 
+// UCP Fulfillment Extension — per fulfillment.json / fulfillment_method.json
+// / fulfillment_group.json. On update, the agent supplies partial structures
+// to select a destination or option. Non-selection fields are omitted by the
+// agent (see ucp_request: "omit" in the spec) so we keep the schema lenient
+// with passthrough — we only strictly need selected_option_id.
+const UcpFulfillmentGroupUpdateSchema = z.object({
+  id: z.string().optional(),
+  selected_option_id: z.string().nullable().optional(),
+}).passthrough()
+
+const UcpFulfillmentMethodUpdateSchema = z.object({
+  id: z.string().optional(),
+  type: z.enum(["shipping", "pickup"]).optional(),
+  selected_destination_id: z.string().nullable().optional(),
+  groups: z.array(UcpFulfillmentGroupUpdateSchema).optional(),
+}).passthrough()
+
+const UcpFulfillmentUpdateSchema = z.object({
+  methods: z.array(UcpFulfillmentMethodUpdateSchema).optional(),
+}).passthrough()
+
 export const UpdateUcpCheckoutSessionSchema = z.object({
   line_items: z.array(z.object({
     item: z.object({ id: z.string() }).optional(),
@@ -196,6 +217,7 @@ export const UpdateUcpCheckoutSessionSchema = z.object({
   })).optional(),
   buyer: UcpBuyerSchema.optional(),
   shipping_address: UcpAddressSchema.optional(),
+  fulfillment: UcpFulfillmentUpdateSchema.optional(),
 })
 
 /**

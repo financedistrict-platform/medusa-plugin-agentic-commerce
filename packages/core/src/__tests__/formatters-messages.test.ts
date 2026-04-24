@@ -195,7 +195,9 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
     expect(session.expires_at).toBe("2026-04-17T06:00:00.000Z")
   })
 
-  it("does not emit the non-spec 'fulfillment' top-level field", () => {
+  it("emits the spec-compliant 'fulfillment' field (Fulfillment Extension)", () => {
+    // Per UCP Fulfillment Extension (shopping/fulfillment.json), checkout is
+    // extended with a `fulfillment` field containing methods → groups → options.
     const session = formatUcpCheckoutSession(ctx, {
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
@@ -203,7 +205,8 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
       shipping_methods: [{ id: "sm1", amount: 500, name: "Std" }],
     }, "https://api.test/ucp/checkout-sessions") as any
 
-    expect(session.fulfillment).toBeUndefined()
+    expect(session.fulfillment).toBeDefined()
+    expect(Array.isArray(session.fulfillment.methods)).toBe(true)
   })
 
   it("uppercases currency code per spec (ISO 4217)", () => {
