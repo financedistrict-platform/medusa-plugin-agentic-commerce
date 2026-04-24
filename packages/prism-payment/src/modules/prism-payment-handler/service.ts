@@ -104,15 +104,16 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   async prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<CheckoutPrepareResult | null> {
     const { cart, checkoutBaseUrl, storeName, container } = input
 
-    const total = cart.total ?? cart.raw_total?.value ?? 0
+    const totalMinor = cart.total ?? cart.raw_total?.value ?? 0
     const currency = (cart.currency_code || "eur").toUpperCase()
+    const amount = (totalMinor / 100).toString()
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
     // Idempotency — skip if already prepared for this exact total
     const existingConfig = cart.metadata?.[PRISM_CHECKOUT_CONFIG_KEY] as any
     if (existingConfig?.config?.resource?.url === resourceUrl) {
       const existingAmount = existingConfig._prepared_amount
-      if (existingAmount === total) {
+      if (existingAmount === amount) {
         return existingConfig as CheckoutPrepareResult
       }
     }
@@ -121,7 +122,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     let prepareResult: CheckoutPrepareResult
     try {
       prepareResult = await this.client.checkoutPrepare({
-        amount: Math.round(total),
+        amount,
         currency,
         resourceUrl,
         resourceDescription: `Purchase from ${storeName}`,
@@ -140,7 +141,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
           ...(cart.metadata || {}),
           [PRISM_CHECKOUT_CONFIG_KEY]: {
             ...prepareResult,
-            _prepared_amount: total,
+            _prepared_amount: amount,
           },
         },
       })

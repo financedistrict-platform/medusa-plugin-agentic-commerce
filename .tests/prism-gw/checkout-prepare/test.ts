@@ -19,7 +19,7 @@ console.log("Input:", JSON.stringify(request, null, 2), "\n")
 
 try {
   const result = await client.checkoutPrepare({
-    amount: Number(request.amount),
+    amount: request.amount,
     currency: request.currency,
     resourceUrl: request.resource.url,
     resourceDescription: request.resource.description,

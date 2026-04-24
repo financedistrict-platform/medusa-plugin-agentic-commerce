@@ -17,8 +17,8 @@
 // =====================================================
 
 export type CheckoutPrepareInput = {
-  /** Amount in minor units (cents). Will be converted to string for Prism. */
-  amount: number
+  /** Amount in standard units as string (e.g., "15.00" for $15). Prism expects full amount, not cents. */
+  amount: string
   /** ISO 4217 currency code (e.g., "USD", "EUR") */
   currency: string
   /** Unique URL for this checkout session (used as x402 resource binding) */
@@ -101,7 +101,7 @@ export class PrismClient {
         "X-API-Key": this.apiKey,
       },
       body: JSON.stringify({
-        amount: String(input.amount),
+        amount: input.amount,
         currency: input.currency.toUpperCase(),
         resource: {
           url: input.resourceUrl,
