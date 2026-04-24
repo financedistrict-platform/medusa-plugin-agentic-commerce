@@ -1,0 +1,9 @@
+{
+  "amount": "1500",
+  "currency": "USD",
+  "resource": {
+    "url": "https://store.example.com/checkout/test-session-001",
+    "description": "Integration test purchase"
+  }
+}
+

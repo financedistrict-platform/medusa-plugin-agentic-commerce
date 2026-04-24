@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:checkout-prepare": "tsx checkout-prepare/test.ts",
+    "test:payment-profile": "tsx payment-profile/test.ts",
+    "test:all": "tsx checkout-prepare/test.ts && tsx payment-profile/test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "dotenv": "^16.0.0"
+  }
+}
