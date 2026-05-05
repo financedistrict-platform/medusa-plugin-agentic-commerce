@@ -33,5 +33,10 @@ jobs:
       - name: Install
         run: npm install
 
+      # NODE_ENV=production tells Medusa CLI's plugin:build to skip the
+      # ts-node loader path. Without it, the build pulls ts-node as a
+      # dev-time fallback which isn't an explicit dep here.
       - name: Build all workspaces
         run: npm run build
+        env:
+          NODE_ENV: production

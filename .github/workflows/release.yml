@@ -52,8 +52,11 @@ jobs:
       - name: Install
         run: npm install
 
+      # See ci.yml note on NODE_ENV.
       - name: Build
         run: npm run build
+        env:
+          NODE_ENV: production
 
       - name: Create Release PR or Publish
         uses: changesets/action@v1
