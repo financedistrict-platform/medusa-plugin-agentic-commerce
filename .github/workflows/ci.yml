@@ -1,0 +1,42 @@
+name: CI
+
+# PR-time validation. Builds every workspace package — confirms the
+# source compiles and the published artifacts emit cleanly. Tests will
+# slot in here once Vitest is wired up.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # `npm install` (not `npm ci`) because the repo deliberately
+      # gitignores package-lock.json — the Medusa CLI's admin-extensions
+      # rollup build pulls platform-specific binaries that npm's
+      # lockfile doesn't track reliably across OSes (npm/cli#4828), so
+      # tracking the lockfile creates more breakage than determinism.
+      - name: Install
+        run: npm install
+
+      # NODE_ENV=production tells Medusa CLI's plugin:build to skip the
+      # ts-node loader path. Without it, the build pulls ts-node as a
+      # dev-time fallback which isn't an explicit dep here.
+      - name: Build all workspaces
+        run: npm run build
+        env:
+          NODE_ENV: production
