@@ -124,7 +124,7 @@ export const CreateAcpCheckoutSessionSchema = z.object({
   locale: z.string().optional(),
   timezone: z.string().optional(),
   quote_id: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
 })
 
 // ACP CheckoutSessionUpdateRequest — per spec
@@ -232,7 +232,7 @@ const UcpPaymentInstrumentSchema = z.object({
   /** Broad category of the instrument (e.g., "default", "card") */
   type: z.string().optional(),
   /** Payment credential — structure is handler-defined */
-  credential: z.record(z.unknown()).optional(),
+  credential: z.record(z.string(), z.unknown()).optional(),
 })
 
 /**
