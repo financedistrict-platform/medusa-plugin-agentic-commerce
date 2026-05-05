@@ -24,10 +24,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
+      # `npm install` (not `npm ci`) because the repo deliberately
+      # gitignores package-lock.json — the Medusa CLI's admin-extensions
+      # rollup build pulls platform-specific binaries that npm's
+      # lockfile doesn't track reliably across OSes (npm/cli#4828), so
+      # tracking the lockfile creates more breakage than determinism.
       - name: Install
-        run: npm ci
+        run: npm install
 
       - name: Build all workspaces
         run: npm run build

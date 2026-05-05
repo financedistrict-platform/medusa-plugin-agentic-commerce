@@ -46,11 +46,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
           registry-url: https://registry.npmjs.org
 
+      # See ci.yml for why npm install over npm ci. Same reason here.
       - name: Install
-        run: npm ci
+        run: npm install
 
       - name: Build
         run: npm run build
