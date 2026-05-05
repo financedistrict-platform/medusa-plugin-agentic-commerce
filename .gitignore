@@ -5,6 +5,5 @@ dist/
 *.log
 *.tgz
 .DS_Store
-package-lock.json
 .docs/
 
