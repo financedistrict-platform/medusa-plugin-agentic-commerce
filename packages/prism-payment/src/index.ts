@@ -49,7 +49,11 @@
 
 // Payment Handler Adapter module
 export { default as PrismPaymentHandlerModule, PRISM_PAYMENT_HANDLER_MODULE } from "./modules/prism-payment-handler"
-export { default as PrismPaymentHandlerAdapter, PRISM_CHECKOUT_CONFIG_KEY } from "./modules/prism-payment-handler/service"
+export {
+  default as PrismPaymentHandlerAdapter,
+  PRISM_CHECKOUT_DATA_KEY,
+  PRISM_CHECKOUT_CONFIG_KEY,
+} from "./modules/prism-payment-handler/service"
 export type { PrismPaymentHandlerOptions } from "./modules/prism-payment-handler/service"
 
 // Payment Provider module
@@ -57,7 +61,17 @@ export { default as PrismPaymentProvider } from "./modules/prism-payment"
 
 // Prism Client
 export { PrismClient } from "./lib/prism-client"
-export type { PrismClientOptions, CheckoutPrepareInput, CheckoutPrepareResult, X402AcceptEntry } from "./lib/prism-client"
+export type {
+  PrismClientOptions,
+  PreparePaymentInput,
+  UcpHandlerDiscoveryEntry,
+  UcpHandlersDiscoveryResponse,
+  UcpCheckoutHandlerEntry,
+  UcpCheckoutPrepareResponse,
+  AcpHandler,
+  PaymentHandlerConfig,
+  X402AcceptEntry,
+} from "./lib/prism-client"
 
 // Prism types
 export type {
