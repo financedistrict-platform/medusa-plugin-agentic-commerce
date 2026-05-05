@@ -1,0 +1,33 @@
+name: CI
+
+# PR-time validation. Builds every workspace package — confirms the
+# source compiles and the published artifacts emit cleanly. Tests will
+# slot in here once Vitest is wired up.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build all workspaces
+        run: npm run build

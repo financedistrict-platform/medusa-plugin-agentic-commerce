@@ -1,0 +1,69 @@
+name: Release
+
+# Automated package releases via Changesets.
+#
+# How it works:
+# - Contributors add a changeset with `npm run changeset` describing
+#   their change and the bump type per package (patch/minor/major).
+# - On push to main, this workflow looks for pending changesets:
+#     - If found, it opens (or updates) a "Version Packages" PR that
+#       consumes the changesets, bumps versions in package.json, and
+#       updates CHANGELOGs.
+#     - When that PR is merged, the workflow runs again, sees no
+#       pending changesets, and instead publishes the bumped packages
+#       to npm.
+#
+# Requires:
+# - NPM_TOKEN secret with publish access to @financedistrict/* on npm.
+# - GITHUB_TOKEN (provided automatically) with contents:write +
+#   pull-requests:write.
+# - Org setting "Allow GitHub Actions to create and approve pull
+#   requests" enabled (or repo-level equivalent).
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Create Release PR or Publish
+        uses: changesets/action@v1
+        with:
+          publish: npm run release
+          version: npm run version-packages
+          commit: "chore: version packages"
+          title: "chore: version packages"
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

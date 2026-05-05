@@ -8,6 +8,13 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "build:core": "npm run build -w packages/core",
-    "build:prism": "npm run build -w packages/prism-payment"
+    "build:prism": "npm run build -w packages/prism-payment",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "npm run build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "0.6.0",
+    "@changesets/cli": "2.31.0"
   }
 }
