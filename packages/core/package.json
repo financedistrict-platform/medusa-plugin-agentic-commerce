@@ -42,8 +42,7 @@
     "build": "medusa plugin:build",
     "develop": "medusa plugin:develop",
     "publish:local": "medusa plugin:publish",
-    "db:generate": "medusa plugin:db:generate",
-    "prepublishOnly": "npm run build"
+    "db:generate": "medusa plugin:db:generate"
   },
   "devDependencies": {
     "@medusajs/framework": "^2.13.0",
