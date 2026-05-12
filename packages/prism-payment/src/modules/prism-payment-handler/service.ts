@@ -103,9 +103,16 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   async prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<PrismCheckoutData | null> {
     const { cart, checkoutBaseUrl, storeName, container } = input
 
-    const totalMinor = cart.total ?? cart.raw_total?.value ?? 0
+    // Medusa v2 stores cart.total in MAJOR units as a BigNumber (e.g., 17 for
+    // €17.00, not 1700). Prism's `amount` field expects a decimal string in
+    // standard/major units ("15.00" for $15) — see prism-client.ts. So we pass
+    // the value through as a string without any division. Previously this code
+    // divided by 100 on the wrong assumption that cart.total was in cents,
+    // producing a 100× under-quote (€17 → "0.17" → 170000 raw EURC instead of
+    // 17000000).
+    const totalMajor = cart.total ?? cart.raw_total?.value ?? 0
     const currency = (cart.currency_code || "eur").toUpperCase()
-    const amount = (totalMinor / 100).toString()
+    const amount = String(totalMajor)
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
     // Idempotency — return existing blob if we already prepared for
