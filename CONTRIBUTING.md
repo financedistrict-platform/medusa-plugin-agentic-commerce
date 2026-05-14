@@ -27,13 +27,13 @@ Small + focused is best. Some guidance:
 - **Run the build.** `npm run build` should pass. CI will catch this anyway, but locally is faster.
 - **Add a changeset.** If your PR changes a published package, run `npm run changeset` and commit the generated `.changeset/*.md` file. Pick the bump type (patch/minor/major) per package and write a one-line summary — that summary lands in the CHANGELOG. Don't edit `package.json` versions directly; the release workflow does that.
 
-### Release flow (automated)
+### Release flow
 
-Releases run via [Changesets](https://github.com/changesets/changesets) and the GitHub Action in `.github/workflows/release.yml`:
+Releases run via [Changesets](https://github.com/changesets/changesets), driven from an **operator-triggered workflow in `financedistrict-platform/fd-deployments`** (an internal repo). The release does not auto-fire on push to `main` here — a maintainer clicks "Run workflow" once per release step.
 
 1. Each PR that changes a published package adds a changeset.
-2. On merge to `main`, the workflow opens (or updates) a `chore: version packages` PR that consumes the changesets, bumps versions, and updates CHANGELOGs.
-3. Merging that PR triggers `changeset publish` and the packages go to npm.
+2. Once changesets have landed on `main`, a maintainer runs `Release Medusa Agentic Commerce` in `fd-deployments`. That opens (or updates) a `chore: version packages` PR here, opened by `fd-ci[bot]`. CI runs on it; merge it via the standard merge button.
+3. After that merges, the maintainer runs the same workflow once more; it sees no pending changesets and publishes the bumped packages to npm.
 
 If you're a maintainer and need to release manually (rare), run `npm run version-packages` then `npm run release` locally with a valid `NPM_TOKEN`.
 
