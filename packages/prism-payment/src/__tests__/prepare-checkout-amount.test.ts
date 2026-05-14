@@ -90,4 +90,78 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
     })
     expect(result?.preparedAmount).toBe("25")
   })
+
+  it("strips the 20-digit precision suffix on Medusa v2 BigNumber cart.total values", async () => {
+    // In production query.graph returns cart.total as a Medusa BigNumber, NOT
+    // a plain JS number. Medusa's BigNumber implements Symbol.toPrimitive —
+    // hint="string" returns the bignumber.js raw value at 20-digit precision
+    // ("34" → "34.000000000000000000"), hint="number" returns the numeric.
+    //
+    // Without explicit Number() coercion, String(cart.total) sends Prism a
+    // 20-digit precision string which it rejects → Promise.allSettled swallows
+    // the rejection → cart metadata is never written → the session response
+    // renders `payment_handlers: {}` (the "agent has no way to pay" regression).
+    //
+    // This mock mirrors Medusa BigNumber's Symbol.toPrimitive contract exactly.
+    function makeMedusaBigNumber(numeric: number, rawPrecision: string) {
+      return {
+        numeric,
+        raw: { value: rawPrecision, precision: 20 },
+        [Symbol.toPrimitive](hint: string) {
+          if (hint === "string") return rawPrecision
+          return numeric
+        },
+        valueOf() {
+          return numeric
+        },
+        toJSON() {
+          return numeric
+        },
+      }
+    }
+
+    await adapter.prepareCheckoutPayment({
+      cart: {
+        id: "c-bn",
+        total: makeMedusaBigNumber(34, "34.000000000000000000"),
+        currency_code: "eur",
+        metadata: {},
+      } as any,
+      checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
+      storeName: "Test",
+      container: fakeContainer() as any,
+    })
+
+    // Without the Number() coercion this would be "34.000000000000000000".
+    expect(prepareUcpSpy.mock.calls[0][0].amount).toBe("34")
+    expect(prepareAcpSpy.mock.calls[0][0].amount).toBe("34")
+  })
+
+  it("preserves fractional values on Medusa BigNumber (e.g., 17.5)", async () => {
+    function makeMedusaBigNumber(numeric: number, rawPrecision: string) {
+      return {
+        numeric,
+        raw: { value: rawPrecision, precision: 20 },
+        [Symbol.toPrimitive](hint: string) {
+          if (hint === "string") return rawPrecision
+          return numeric
+        },
+        valueOf() {
+          return numeric
+        },
+      }
+    }
+    await adapter.prepareCheckoutPayment({
+      cart: {
+        id: "c-bn-frac",
+        total: makeMedusaBigNumber(17.5, "17.500000000000000000"),
+        currency_code: "usd",
+        metadata: {},
+      } as any,
+      checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
+      storeName: "Test",
+      container: fakeContainer() as any,
+    })
+    expect(prepareUcpSpy.mock.calls[0][0].amount).toBe("17.5")
+  })
 })
