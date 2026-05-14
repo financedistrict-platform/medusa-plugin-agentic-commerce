@@ -105,14 +105,23 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
 
     // Medusa v2 stores cart.total in MAJOR units as a BigNumber (e.g., 17 for
     // €17.00, not 1700). Prism's `amount` field expects a decimal string in
-    // standard/major units ("15.00" for $15) — see prism-client.ts. So we pass
-    // the value through as a string without any division. Previously this code
-    // divided by 100 on the wrong assumption that cart.total was in cents,
-    // producing a 100× under-quote (€17 → "0.17" → 170000 raw EURC instead of
-    // 17000000).
+    // standard/major units ("15.00" for $15) — see prism-client.ts.
+    //
+    // Subtle: Medusa's BigNumber implements Symbol.toPrimitive — when called
+    // with hint="string" (which is what String() and template literals do) it
+    // returns the bignumber.js raw value at 20-digit precision, e.g. "34"
+    // becomes "34.000000000000000000". Prism's /payment-requirements endpoint
+    // rejects that format, the call throws, Promise.allSettled below swallows
+    // the rejection, the adapter returns null, no metadata is written, and the
+    // checkout session renders with `payment_handlers: {}` — agents see
+    // `ready_for_complete` with no way to pay.
+    //
+    // Coerce to a regular number first (Number() triggers Symbol.toPrimitive
+    // with hint="number" which returns BigNumber.numeric — a plain JS number)
+    // before stringifying, so we send a clean decimal like "34" or "17.5".
     const totalMajor = cart.total ?? cart.raw_total?.value ?? 0
     const currency = (cart.currency_code || "eur").toUpperCase()
-    const amount = String(totalMajor)
+    const amount = String(Number(totalMajor))
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
     // Idempotency — return existing blob if we already prepared for
