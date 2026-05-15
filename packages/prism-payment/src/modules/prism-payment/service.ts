@@ -164,9 +164,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     if (this.verifyBeforeSettle) {
       try {
         const verifyResult = await this.verifyWithPrism(authorization)
-        if (!verifyResult.valid) {
+        if (!verifyResult.isValid) {
           return {
-            data: { ...data, error: `prism_verification_failed: ${verifyResult.reason}` },
+            data: { ...data, error: `prism_verification_failed: ${verifyResult.error ?? "unknown"}` },
             status: "error" as PaymentSessionStatus,
           }
         }
@@ -182,16 +182,18 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       try {
         const settleResult = await this.settleWithPrism(authorization)
         if (!settleResult.success) {
+          const reason = settleResult.errorReason ?? "unknown"
           return {
             data: {
               ...data,
-              error: `settlement_failed: ${settleResult.errorCode}`,
-              error_message: settleResult.errorMessage,
+              error: `settlement_failed: ${reason}`,
+              error_message: reason,
             },
             status: "error" as PaymentSessionStatus,
           }
         }
 
+        const settledNetwork = settleResult.network ?? network
         return {
           data: {
             ...data,
@@ -199,17 +201,16 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
             // Every payment provider that settles on a blockchain should write
             // these under the same names so the agentic-commerce core plugin
             // can surface them in the UCP/ACP response without knowing which
-            // PSP was used. Keep the Prism-specific keys below for existing
-            // admin tooling.
-            transaction_reference: settleResult.facilitatorTransactionId,
-            transaction_status: settleResult.status,
-            transaction_network: network,
+            // PSP was used. We only write fields whose values come from the
+            // Prism response (or the signed authorization) — not synthesised
+            // local constants. Downstream consumers default `transaction_status`
+            // to `"settled"` when the field is absent.
+            transaction_reference: settleResult.transaction,
+            transaction_network: settledNetwork,
             // Prism-specific keys (kept for backwards compatibility)
-            prism_tx_id: settleResult.facilitatorTransactionId,
-            prism_status: settleResult.status,
-            settled_at: settleResult.acceptedAt,
-            network,
-            payer: eip3009.from,
+            prism_tx_id: settleResult.transaction,
+            network: settledNetwork,
+            payer: settleResult.payer ?? eip3009.from,
             amount: eip3009.value,
           },
           status: "authorized" as PaymentSessionStatus,
@@ -266,7 +267,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       const settleResult = await this.settleWithPrism(authorization)
       if (!settleResult.success) {
         throw new Error(
-          `Settlement failed: ${settleResult.errorCode} - ${settleResult.errorMessage}`
+          `Settlement failed: ${settleResult.errorReason ?? "unknown"}`
         )
       }
 
@@ -274,12 +275,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         data: {
           ...data,
           // Generic on-chain transaction keys (see authorizePayment for rationale)
-          transaction_reference: settleResult.facilitatorTransactionId,
-          transaction_status: settleResult.status,
+          transaction_reference: settleResult.transaction,
+          transaction_network: settleResult.network,
           // Prism-specific keys (kept for backwards compatibility)
-          prism_tx_id: settleResult.facilitatorTransactionId,
-          prism_status: settleResult.status,
-          settled_at: settleResult.acceptedAt,
+          prism_tx_id: settleResult.transaction,
           captured: true,
         },
       }
@@ -377,6 +376,12 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
   /**
    * Verify an EIP-3009 authorization with Prism before settlement.
+   *
+   * Normalises Prism's response shape: the canonical Prism Gateway API
+   * (per `@1stdigital/prism-core`) returns `{ isValid, payer, error }`.
+   * Earlier internal builds returned `{ valid, reason }`. We accept both
+   * to stay forward+backward compatible and fail closed if neither field
+   * is explicitly `true`.
    */
   private async verifyWithPrism(
     authorization: X402PaymentAuthorization
@@ -400,11 +405,29 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       throw new Error(`Prism verify returned ${response.status}: ${errorText}`)
     }
 
-    return response.json() as Promise<PrismVerifyResponse>
+    const raw = (await response.json()) as Record<string, unknown>
+    return {
+      // Fail closed: only accept explicit truthy in either canonical or legacy field.
+      isValid: raw.isValid === true || raw.valid === true,
+      payer: typeof raw.payer === "string" ? raw.payer : undefined,
+      error:
+        typeof raw.error === "string"
+          ? raw.error
+          : typeof raw.reason === "string"
+            ? raw.reason
+            : undefined,
+    }
   }
 
   /**
    * Settle (execute on-chain) an EIP-3009 authorization via Prism.
+   *
+   * Normalises Prism's response shape: canonical fields per
+   * `@1stdigital/prism-core` are `{ success, payer, transaction, network,
+   * errorReason }`. Earlier internal builds returned `facilitatorTransactionId`
+   * / `transactionHash` for the tx hash and `errorMessage` / `errorCode` for
+   * the failure reason. We accept the legacy names too so a future Prism rename
+   * doesn't silently break us again.
    */
   private async settleWithPrism(
     authorization: X402PaymentAuthorization
@@ -428,7 +451,23 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       throw new Error(`Prism settle returned ${response.status}: ${errorText}`)
     }
 
-    return response.json() as Promise<PrismSettleResponse>
+    const raw = (await response.json()) as Record<string, unknown>
+    const pickString = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        const v = raw[k]
+        if (typeof v === "string" && v.length > 0) return v
+      }
+      return undefined
+    }
+    return {
+      // Mirror prism-express/saleor parsing: treat a 200 OK as success unless the
+      // response explicitly says success: false.
+      success: raw.success !== false,
+      payer: pickString("payer"),
+      transaction: pickString("transaction", "transactionHash", "facilitatorTransactionId"),
+      network: pickString("network"),
+      errorReason: pickString("errorReason", "errorMessage", "errorCode"),
+    }
   }
 }
 
