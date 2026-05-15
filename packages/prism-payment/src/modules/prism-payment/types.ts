@@ -69,23 +69,45 @@ export type PrismSettleRequest = {
   paymentRequirements: Record<string, unknown>
 }
 
-/** Response from Prism Gateway POST /api/v2/payment/settle */
+/**
+ * Response from Prism Gateway POST /api/v2/payment/settle.
+ *
+ * Matches the canonical `@1stdigital/prism-core` SDK shape: a successful 200 OK
+ * returns `success: true, transaction: "0x…", network: "eip155:…", payer: "0x…"`.
+ * On a logical-failure 200 (e.g., facilitator rejected after broadcast attempt),
+ * `success: false` is paired with `errorReason: "<message>"`.
+ *
+ * Earlier internal builds returned `facilitatorTransactionId`, `errorMessage`,
+ * `errorCode`. The provider's `settleWithPrism` parser accepts both shapes so a
+ * future Prism rename can't silently re-break us.
+ */
 export type PrismSettleResponse = {
   success: boolean
-  facilitatorTransactionId: string
-  status: "Accepted" | "Queued" | "Processing" | "Settled" | "Failed"
-  acceptedAt: string // ISO 8601
-  errorMessage?: string
-  errorCode?: string
+  payer?: string
+  /** EVM tx hash for the on-chain transfer */
+  transaction?: string
+  /** Chain id of the on-chain settlement (e.g. "eip155:84532") */
+  network?: string
+  /** Reason string when `success: false` */
+  errorReason?: string
 }
 
 /** Request to Prism Gateway POST /api/v2/payment/verify */
 export type PrismVerifyRequest = PrismSettleRequest
 
-/** Response from Prism Gateway POST /api/v2/payment/verify */
+/**
+ * Response from Prism Gateway POST /api/v2/payment/verify.
+ *
+ * Matches the canonical `@1stdigital/prism-core` SDK shape: `isValid: boolean`
+ * (with `payer` populated on success and `error` populated on failure).
+ *
+ * Earlier internal builds returned `{ valid, reason }`. The provider's
+ * `verifyWithPrism` parser accepts both shapes for forward+backward compat.
+ */
 export type PrismVerifyResponse = {
-  valid: boolean
-  reason?: string
+  isValid: boolean
+  payer?: string
+  error?: string
 }
 
 // =====================================================
