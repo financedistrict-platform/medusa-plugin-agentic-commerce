@@ -5,6 +5,11 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatUcpError } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
+import {
+  extractSignedSummary,
+  readStoredPrismAccepts,
+  validateSignedAgainstStored,
+} from "../../../../../lib/validate-signed-amount"
 
 const UCP_VERSION = "2026-01-11"
 
@@ -29,6 +34,40 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
 
   const { eip3009Authorization, x402Version, handlerId } = extracted
+
+  // Validate the agent's signed EIP-3009 payload against the cart's
+  // stored Prism quote before forwarding to settlement. See
+  // lib/validate-signed-amount.ts for details. Skipped if the
+  // credential shape is unrecognised or the cart has no stored Prism
+  // quote (non-Prism handler) — those cases fall through to existing
+  // downstream validation.
+  const credentialObject = body?.payment?.instruments?.[0]?.credential
+  const signedSummary = extractSignedSummary(credentialObject)
+  if (signedSummary) {
+    const query = req.scope.resolve("query") as any
+    const { data: [cartForValidation] } = await query.graph({
+      entity: "cart",
+      fields: ["id", "metadata"],
+      filters: { id },
+    })
+    const storedAccepts = readStoredPrismAccepts(
+      cartForValidation?.metadata,
+      handlerId,
+      "ucp",
+    )
+    if (storedAccepts) {
+      const validation = validateSignedAgainstStored(signedSummary, storedAccepts)
+      if (!validation.ok) {
+        res.status(422).json(formatUcpError({
+          ucpVersion: UCP_VERSION,
+          code: validation.code,
+          content: validation.message,
+          severity: "unrecoverable",
+        }))
+        return
+      }
+    }
+  }
 
   try {
     const { result } = await completeCheckoutSessionWorkflow(req.scope).run({
