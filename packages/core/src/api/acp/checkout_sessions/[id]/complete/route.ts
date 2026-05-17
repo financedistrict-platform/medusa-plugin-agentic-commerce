@@ -4,6 +4,11 @@ import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-f
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatAcpError, httpStatusToAcpType } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
+import {
+  extractSignedSummary,
+  readStoredPrismAccepts,
+  validateSignedAgainstStored,
+} from "../../../../../lib/validate-signed-amount"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -28,6 +33,37 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       httpStatus: 400,
     }))
     return
+  }
+
+  // Validate the agent's signed EIP-3009 payload against the cart's
+  // stored Prism quote before forwarding to settlement. The ACP
+  // credential is base64-encoded; extractSignedSummary decodes it.
+  // See lib/validate-signed-amount.ts for details.
+  const signedSummary = extractSignedSummary(eip3009Authorization)
+  if (signedSummary) {
+    const query = req.scope.resolve("query") as any
+    const { data: [cartForValidation] } = await query.graph({
+      entity: "cart",
+      fields: ["id", "metadata"],
+      filters: { id },
+    })
+    const storedAccepts = readStoredPrismAccepts(
+      cartForValidation?.metadata,
+      paymentHandlerId,
+      "acp",
+    )
+    if (storedAccepts) {
+      const validation = validateSignedAgainstStored(signedSummary, storedAccepts)
+      if (!validation.ok) {
+        res.status(422).json(formatAcpError({
+          type: "invalid_request",
+          code: validation.code,
+          message: validation.message,
+          httpStatus: 422,
+        }))
+        return
+      }
+    }
   }
 
   try {
