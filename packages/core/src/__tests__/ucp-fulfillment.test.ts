@@ -11,7 +11,7 @@ import { UpdateUcpCheckoutSessionSchema } from "../api/validation-schemas"
 const ctx = {
   storeName: "Test Store",
   storefrontUrl: "https://store.test",
-  ucpVersion: "2026-01-11",
+  ucpVersion: "2026-04-08",
   acpVersion: "2026-01-30",
   paymentHandlers: {
     getUcpCheckoutHandlers: () => ({}),
@@ -171,7 +171,7 @@ describe("formatUcpCheckoutSession — fulfillment integration", () => {
   it("emits dev.ucp.shopping.fulfillment capability in the envelope", () => {
     const session = formatUcpCheckoutSession(ctx, addressCart, "https://api.test/ucp/checkout-sessions") as any
     expect(session.ucp.capabilities["dev.ucp.shopping.fulfillment"]).toEqual([
-      { version: "2026-01-11" },
+      { version: "2026-04-08" },
     ])
   })
 

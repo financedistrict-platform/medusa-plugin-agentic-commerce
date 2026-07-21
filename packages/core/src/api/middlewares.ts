@@ -19,7 +19,7 @@ import { computeSessionFingerprint, verifySessionOwnership } from "../lib/sessio
 
 // Supported ACP API versions
 const SUPPORTED_ACP_VERSIONS = ["2026-01-30"]
-const UCP_VERSION = "2026-01-11"
+const UCP_VERSION = "2026-04-08"
 
 // --- ACP Auth Middleware ---
 // Validates Bearer token + API-Version header + optional HMAC signature

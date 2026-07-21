@@ -70,7 +70,7 @@ export default class AgenticCommerceService {
     this.storeDescription = options.store_description || process.env.AGENTIC_STORE_DESCRIPTION || ""
     this.apiKey = options.api_key || process.env.AGENTIC_COMMERCE_API_KEY || ""
     this.paymentProviderId = options.payment_provider_id || process.env.AGENTIC_PAYMENT_PROVIDER || "pp_system_default"
-    this.ucpVersion = options.ucp_version || "2026-01-11"
+    this.ucpVersion = options.ucp_version || "2026-04-08"
     this.acpVersion = options.acp_version || "2026-01-30"
 
     this.paymentHandlerRegistry = new PaymentHandlerRegistry()

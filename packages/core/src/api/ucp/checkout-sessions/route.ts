@@ -8,7 +8,7 @@ import { computeSessionFingerprint } from "../../../lib/session-ownership"
 import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../lib/list-shipping-options"
 
-const UCP_VERSION = "2026-01-11"
+const UCP_VERSION = "2026-04-08"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {

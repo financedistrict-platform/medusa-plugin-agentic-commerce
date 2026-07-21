@@ -18,5 +18,5 @@
     "experimentalDecorators": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", ".medusa", "dist"]
+  "exclude": ["node_modules", ".medusa", "dist", "src/__tests__"]
 }
