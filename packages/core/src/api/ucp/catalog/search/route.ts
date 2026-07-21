@@ -1,7 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { formatUcpError } from "../../../../lib/error-formatters"
 
-const UCP_VERSION = "2026-01-11"
+const UCP_VERSION = "2026-04-08"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const body = req.validatedBody as any

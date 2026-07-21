@@ -5,7 +5,7 @@ import { formatAcpCheckoutSession } from "../lib/formatters/acp"
 const ctx = {
   storeName: "Test Store",
   storefrontUrl: "https://store.test",
-  ucpVersion: "2026-01-11",
+  ucpVersion: "2026-04-08",
   acpVersion: "2026-01-30",
   paymentHandlers: {
     getUcpCheckoutHandlers: () => ({}),

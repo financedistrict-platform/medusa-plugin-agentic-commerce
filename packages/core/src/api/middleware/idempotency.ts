@@ -82,7 +82,7 @@ export function createIdempotencyMiddleware(options: {
           })
         } else {
           res.status(400).json({
-            ucp: { version: "2026-01-11", status: "error" },
+            ucp: { version: "2026-04-08", status: "error" },
             messages: [{
               type: "error",
               code: "idempotency_key_required",
@@ -126,7 +126,7 @@ export function createIdempotencyMiddleware(options: {
           })
         } else {
           res.status(422).json({
-            ucp: { version: "2026-01-11", status: "error" },
+            ucp: { version: "2026-04-08", status: "error" },
             messages: [{
               type: "error",
               code: "idempotency_conflict",
@@ -148,7 +148,7 @@ export function createIdempotencyMiddleware(options: {
           })
         } else {
           res.status(409).set("Retry-After", "1").json({
-            ucp: { version: "2026-01-11", status: "error" },
+            ucp: { version: "2026-04-08", status: "error" },
             messages: [{
               type: "error",
               code: "idempotency_in_flight",

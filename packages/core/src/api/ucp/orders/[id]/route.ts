@@ -3,7 +3,7 @@ import { ORDER_FIELDS, FULFILLMENT_FIELDS } from "../../../../lib/order-fields"
 import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 
-const UCP_VERSION = "2026-01-11"
+const UCP_VERSION = "2026-04-08"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params

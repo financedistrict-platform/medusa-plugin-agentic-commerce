@@ -11,7 +11,7 @@ import {
   validateSignedAgainstStored,
 } from "../../../../../lib/validate-signed-amount"
 
-const UCP_VERSION = "2026-01-11"
+const UCP_VERSION = "2026-04-08"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
