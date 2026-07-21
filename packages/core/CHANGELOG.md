@@ -1,5 +1,13 @@
 # @financedistrict/medusa-plugin-agentic-commerce
 
+## 0.1.11
+
+### Patch Changes
+
+- [#17](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/17) [`378a7b0`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/378a7b0494b329ba09d4c7ab37e7d9b25077cc34) Thanks [@Mani-fdt](https://github.com/Mani-fdt)! - Fix UCP version string and complete discovery profile
+
+  Updates the UCP version from `2026-01-11` to `2026-04-08` across all routes and middleware. Completes the `/.well-known/ucp` discovery profile with `spec`+`schema` on all capabilities, service block metadata, `fulfillment` capability, payment handler `name`, top-level store `name`, and `signing_keys`.
+
 ## 0.1.10
 
 ### Patch Changes
