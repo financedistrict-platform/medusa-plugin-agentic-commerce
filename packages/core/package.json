@@ -27,6 +27,11 @@
       "types": "./.medusa/server/src/index.d.ts",
       "default": "./.medusa/server/src/index.js"
     },
+    "./admin": {
+      "import": "./.medusa/server/src/admin/index.mjs",
+      "default": "./.medusa/server/src/admin/index.js",
+      "require": "./.medusa/server/src/admin/index.js"
+    },
     "./package.json": "./package.json",
     "./workflows": "./.medusa/server/src/workflows/index.js",
     "./modules/*": "./.medusa/server/src/modules/*/index.js",
