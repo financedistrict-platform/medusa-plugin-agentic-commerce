@@ -2,10 +2,7 @@
 "@financedistrict/medusa-plugin-agentic-commerce": patch
 ---
 
-fix(packaging): expose ./admin subpath in exports map
+fix: add ./admin entry to package exports
 
-Medusa's admin bundler resolves plugin admin extensions by importing
-`<package-name>/admin`. The exports map was missing this entry, so the
-bundler silently skipped all admin UI (settings page, dashboard stats
-widget, order agent badge). Added `./admin` with import/default/require
-conditions matching the @medusajs/draft-order reference implementation.
+Missing ./admin in the exports map caused Medusa's admin bundler to
+silently skip the plugin's admin UI.
