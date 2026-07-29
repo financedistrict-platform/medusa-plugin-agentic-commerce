@@ -1,5 +1,14 @@
 # @financedistrict/medusa-plugin-agentic-commerce
 
+## 0.1.12
+
+### Patch Changes
+
+- [#19](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/19) [`fe1e7d5`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/fe1e7d5dffb038d9b5512554921ff17de4deb1c5) Thanks [@Mani-fdt](https://github.com/Mani-fdt)! - fix: add ./admin entry to package exports
+
+  Missing ./admin in the exports map caused Medusa's admin bundler to
+  silently skip the plugin's admin UI.
+
 ## 0.1.11
 
 ### Patch Changes
