@@ -6,7 +6,6 @@ import {
   CompleteAcpCheckoutSessionSchema,
   CreateUcpCheckoutSessionSchema,
   UpdateUcpCheckoutSessionSchema,
-  CompleteUcpCheckoutSessionSchema,
   CreateUcpCartSchema,
   UpdateUcpCartSchema,
   CatalogSearchSchema,
@@ -16,10 +15,12 @@ import { createIdempotencyMiddleware } from "./middleware/idempotency"
 import { formatAcpError } from "../lib/error-formatters"
 import { formatUcpError } from "../lib/error-formatters"
 import { computeSessionFingerprint, verifySessionOwnership } from "../lib/session-ownership"
+import { ucpVersionFor } from "../lib/ucp-version"
+import { buildUcpProfile } from "../lib/ucp-profile"
+import { getPublicBaseUrl } from "../lib/public-url"
 
 // Supported ACP API versions
 const SUPPORTED_ACP_VERSIONS = ["2026-01-30"]
-const UCP_VERSION = "2026-04-08"
 
 // --- ACP Auth Middleware ---
 // Validates Bearer token + API-Version header + optional HMAC signature
@@ -114,7 +115,7 @@ async function validateUcpRequest(
 
   if (!ucpAgent) {
     res.status(400).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "missing_ucp_agent",
       content: "Missing UCP-Agent header for platform identification",
     }))
@@ -125,7 +126,7 @@ async function validateUcpRequest(
   const requestId = req.headers["request-id"] as string | undefined
   if (!requestId) {
     res.status(400).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "missing_request_id",
       content: "Request-Id header is required for UCP requests",
     }))
@@ -142,7 +143,7 @@ async function validateUcpRequest(
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     if (!agenticCommerceService.validateApiKey(token)) {
       res.status(401).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "unauthorized",
         content: "Invalid Bearer token",
       }))
@@ -195,7 +196,7 @@ async function verifySessionOwner(
         }))
       } else {
         res.status(403).json(formatUcpError({
-          ucpVersion: UCP_VERSION,
+          ucpVersion: ucpVersionFor(req.scope),
           code: "session_ownership_mismatch",
           content: "You do not have permission to modify this checkout session",
         }))
@@ -237,31 +238,14 @@ async function resolvePaymentAdapters(
 
 async function wellKnownUcpHandler(req: MedusaRequest, res: MedusaResponse) {
   const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
-  const paymentHandlers = agenticCommerceService.getPaymentHandlerService()
-  const ucpVersion = agenticCommerceService.getUcpVersion()
-  const handlers = await paymentHandlers.getUcpDiscoveryHandlers()
-  const baseUrl = `${req.protocol}://${req.get("host")}`
+  const handlers = await agenticCommerceService.getPaymentHandlerService().getUcpDiscoveryHandlers()
 
-  res.json({
-    ucp: {
-      version: ucpVersion,
-      services: {
-        "dev.ucp.shopping": [{
-          version: ucpVersion,
-          transport: "rest",
-          endpoint: `${baseUrl}/ucp`,
-        }],
-      },
-      capabilities: {
-        "dev.ucp.shopping.catalog.search": [{ version: ucpVersion }],
-        "dev.ucp.shopping.catalog.lookup": [{ version: ucpVersion }],
-        "dev.ucp.shopping.checkout": [{ version: ucpVersion }],
-        "dev.ucp.shopping.cart": [{ version: ucpVersion }],
-        "dev.ucp.shopping.order": [{ version: ucpVersion }],
-      },
-      payment_handlers: handlers,
-    },
-  })
+  res.json(buildUcpProfile(
+    agenticCommerceService.getUcpVersion(),
+    getPublicBaseUrl(req),
+    agenticCommerceService.getStoreName(),
+    handlers,
+  ))
 }
 
 async function wellKnownAcpHandler(req: MedusaRequest, res: MedusaResponse) {
@@ -428,11 +412,6 @@ export default defineMiddlewares({
       matcher: "/ucp/checkout-sessions/:id",
       method: "PUT",
       middlewares: [validateAndTransformBody(UpdateUcpCheckoutSessionSchema)],
-    },
-    {
-      matcher: "/ucp/checkout-sessions/:id/complete",
-      method: "POST",
-      middlewares: [validateAndTransformBody(CompleteUcpCheckoutSessionSchema)],
     },
     {
       matcher: "/ucp/carts",

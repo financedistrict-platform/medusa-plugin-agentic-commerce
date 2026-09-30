@@ -1,7 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { formatUcpError } from "../../../../lib/error-formatters"
-
-const UCP_VERSION = "2026-04-08"
+import { ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const body = req.validatedBody as any
@@ -57,13 +56,13 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       .map((p: any) => agenticCommerceService.formatUcpProduct(p))
 
     res.json({
-      ucp: { version: UCP_VERSION, status: "success" },
+      ucp: { version: ucpVersionFor(req.scope), status: "success" },
       products: formatted,
       messages: [],
     })
   } catch (error: any) {
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: error.message,
     }))

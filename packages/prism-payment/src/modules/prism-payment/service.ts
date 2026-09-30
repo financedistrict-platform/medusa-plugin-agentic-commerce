@@ -27,7 +27,7 @@ import type {
   PrismSettleResponse,
   PrismVerifyResponse,
 } from "./types"
-import { PRISM_HANDLER_ID } from "./types"
+import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
 
 /**
  * Prism Payment Provider for Medusa v2
@@ -98,6 +98,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     if (inputData.x402_version) {
       data.x402_version = inputData.x402_version
     }
+    if (inputData.instrument_type) {
+      data.instrument_type = inputData.instrument_type
+    }
 
     return { id: sessionId, data }
   }
@@ -127,6 +130,13 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       console.error("[prism-payment] Failed to decode authorization:", error)
       return {
         data: { ...data, error: "invalid_authorization_format" },
+        status: "error" as PaymentSessionStatus,
+      }
+    }
+
+    if (data.instrument_type !== undefined && !isX402Instrument(data.instrument_type, authorization)) {
+      return {
+        data: { ...data, error: "invalid_instrument_type" },
         status: "error" as PaymentSessionStatus,
       }
     }

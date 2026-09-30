@@ -9,6 +9,7 @@ export type ExtractedPayment = {
   eip3009Authorization: string
   x402Version?: number
   handlerId?: string
+  instrumentType?: string
 }
 
 export function extractUcpPayment(body: Record<string, unknown>): ExtractedPayment | null {
@@ -35,5 +36,6 @@ export function extractUcpPayment(body: Record<string, unknown>): ExtractedPayme
     eip3009Authorization: authorization,
     x402Version,
     handlerId: instrument.handler_id as string | undefined,
+    instrumentType: instrument.type as string | undefined,
   }
 }

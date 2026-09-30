@@ -7,8 +7,7 @@ import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
 import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../lib/list-shipping-options"
-
-const UCP_VERSION = "2026-04-08"
+import { ucpVersionFor } from "../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
@@ -42,7 +41,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       if (!match) {
         const supported = await getSupportedCountries(req.scope)
         res.status(400).json(formatUcpError({
-          ucpVersion: UCP_VERSION,
+          ucpVersion: ucpVersionFor(req.scope),
           code: "country_not_supported",
           content: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${supported.join(", ") || "(none configured)"}.`,
           severity: "recoverable",
@@ -64,7 +63,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         currency_code: currencyCode,
         protocol: "ucp",
         agent_identifier: agentIdentifier,
-        protocol_version: UCP_VERSION,
+        protocol_version: ucpVersionFor(req.scope),
         session_fingerprint: computeSessionFingerprint(req),
       } as any,
     })
@@ -108,7 +107,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const msg: string = error?.message || ""
     if (/Country with code .* is not within region/i.test(msg)) {
       res.status(400).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "country_not_supported",
         content: msg,
         severity: "recoverable",
@@ -117,7 +116,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       return
     }
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: msg || "Internal error",
     }))

@@ -225,14 +225,10 @@ export const UpdateUcpCheckoutSessionSchema = z.object({
  * Matches the UCP spec: checkout.json → payment.json → payment_instrument.json
  */
 const UcpPaymentInstrumentSchema = z.object({
-  /** Unique identifier for this instrument instance */
-  id: z.string().optional(),
-  /** The handler instance that produced this instrument (e.g., "prism_default") */
-  handler_id: z.string().optional(),
-  /** Broad category of the instrument (e.g., "default", "card") */
-  type: z.string().optional(),
-  /** Payment credential — structure is handler-defined */
-  credential: z.record(z.string(), z.unknown()).optional(),
+  id: z.string(),
+  handler_id: z.string(),
+  type: z.string(),
+  credential: z.object({ type: z.string() }).passthrough().optional(),
 })
 
 /**

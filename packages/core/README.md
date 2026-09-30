@@ -120,6 +120,8 @@ UCP is designed for **agent-to-merchant** interactions. It uses a shopping-cart 
 
 **Required headers:** `UCP-Agent`, `Request-Id`
 
+**Complete checkout:** each `payment.instruments[]` entry needs `id`, `handler_id` and `type`, and a `credential` must carry `type`. With the Prism provider, `handler_id` must be `xyz.fd.prism_payment` and both types must be `x402`. A failed payment returns `422 payment_failed`; responses under 500 are cached per `Idempotency-Key` for 24 hours, so retry with a new key.
+
 ### ACP (Agent Commerce Protocol)
 
 ACP is designed for **platform-to-merchant** interactions. It uses a session-based model where the platform manages the checkout flow.
@@ -284,7 +286,7 @@ import {
 | `store_description` | `string` | `""` | Store description for discovery |
 | `payment_provider_id` | `string` | `"pp_system_default"` | Medusa payment provider ID |
 | `payment_handler_adapters` | `string[]` | `[]` | Module keys of payment handler adapters |
-| `ucp_version` | `string` | `"2026-01-11"` | UCP protocol version to advertise |
+| `ucp_version` | `string` | `"2026-08-25"` | UCP protocol version to advertise |
 | `acp_version` | `string` | `"2026-01-30"` | ACP protocol version to advertise |
 
 ### Environment Variables
@@ -332,7 +334,7 @@ import {
 
 Types and formatters are audited against the official protocol specifications:
 
-- **UCP** [`2026-01-11`](https://github.com/Universal-Commerce-Protocol/ucp) — catalog, checkout, fulfillment, payment, order, discovery
+- **UCP** [`2026-08-25`](https://github.com/Universal-Commerce-Protocol/ucp) — catalog, checkout, fulfillment, payment, order, discovery
 - **ACP** [`2026-01-30`](https://github.com/agentic-commerce-protocol/agentic-commerce-protocol/tree/main/spec/2026-01-30) — checkout sessions, delegate payment, capabilities
 
 ## Versioning

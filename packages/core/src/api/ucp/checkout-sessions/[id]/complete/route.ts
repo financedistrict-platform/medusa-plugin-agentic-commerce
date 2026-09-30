@@ -5,68 +5,74 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatUcpError } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
+import { ucpVersionFor } from "../../../../../lib/ucp-version"
+import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
-  extractSignedSummary,
-  readStoredPrismAccepts,
-  validateSignedAgainstStored,
-} from "../../../../../lib/validate-signed-amount"
-
-const UCP_VERSION = "2026-04-08"
+  checkPrismInstrument,
+  checkQuoteBinding,
+  formatZodIssuePath,
+  isPrismProvider,
+  type GuardFailure,
+} from "../../../../../lib/ucp-complete-guard"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
-  const body = req.validatedBody as any
+  const ucpVersion = ucpVersionFor(req.scope)
+
+  const reject = (failure: GuardFailure) => {
+    res.status(failure.status).json(formatUcpError({
+      ucpVersion,
+      code: failure.code,
+      content: failure.content,
+      severity: "unrecoverable",
+    }))
+  }
+
+  const parsed = CompleteUcpCheckoutSessionSchema.safeParse(req.body ?? {})
+  if (!parsed.success) {
+    reject({
+      status: 400,
+      code: "invalid_instrument",
+      content: `Invalid or missing field: ${formatZodIssuePath(parsed.error.issues)}`,
+    })
+    return
+  }
+  const body = parsed.data
 
   const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
   const paymentProviderId = agenticCommerceService.getPaymentProviderId()
 
-  // Extract payment from UCP spec (payment.instruments[]) or legacy (payment_credentials)
-  const extracted = extractUcpPayment(body || {})
-
-  // F6: Require payment credentials to prevent completing checkout without paying
+  const extracted = extractUcpPayment(body)
   if (!extracted) {
     res.status(400).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion,
       code: "missing_payment",
       content: "Payment is required to complete checkout. Provide payment.instruments with a valid credential.",
     }))
     return
   }
 
-  const { eip3009Authorization, x402Version, handlerId } = extracted
+  const { eip3009Authorization, x402Version, handlerId, instrumentType } = extracted
+  const instrument = body.payment!.instruments[0]
 
-  // Validate the agent's signed EIP-3009 payload against the cart's
-  // stored Prism quote before forwarding to settlement. See
-  // lib/validate-signed-amount.ts for details. Skipped if the
-  // credential shape is unrecognised or the cart has no stored Prism
-  // quote (non-Prism handler) — those cases fall through to existing
-  // downstream validation.
-  const credentialObject = body?.payment?.instruments?.[0]?.credential
-  const signedSummary = extractSignedSummary(credentialObject)
-  if (signedSummary) {
-    const query = req.scope.resolve("query") as any
-    const { data: [cartForValidation] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata"],
-      filters: { id },
-    })
-    const storedAccepts = readStoredPrismAccepts(
-      cartForValidation?.metadata,
-      handlerId,
-      "ucp",
-    )
-    if (storedAccepts) {
-      const validation = validateSignedAgainstStored(signedSummary, storedAccepts)
-      if (!validation.ok) {
-        res.status(422).json(formatUcpError({
-          ucpVersion: UCP_VERSION,
-          code: validation.code,
-          content: validation.message,
-          severity: "unrecoverable",
-        }))
-        return
-      }
+  if (isPrismProvider(paymentProviderId)) {
+    const instrumentFailure = checkPrismInstrument(instrument)
+    if (instrumentFailure) {
+      reject(instrumentFailure)
+      return
     }
+  }
+
+  const query = req.scope.resolve("query") as any
+  const { data: [cartForValidation] } = await query.graph({
+    entity: "cart",
+    fields: ["id", "metadata"],
+    filters: { id },
+  })
+  const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, instrument.credential)
+  if (bindingFailure) {
+    reject(bindingFailure)
+    return
   }
 
   try {
@@ -78,12 +84,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
           eip3009_authorization: eip3009Authorization,
           x402_version: x402Version,
           handler_id: handlerId,
+          instrument_type: instrumentType,
         },
       },
     })
 
     // Enrich cart metadata with payment details and completion timestamp
-    const query = req.scope.resolve("query") as any
     const { data: [cartForMeta] } = await query.graph({
       entity: "cart",
       fields: ["id", "metadata", "total", "currency_code"],
@@ -121,7 +127,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     // — surface as an error rather than lying that status is "completed".
     if (!orderId) {
       res.status(500).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion,
         code: "order_not_created",
         content: "Checkout completion did not produce an order. Please retry or contact support.",
         severity: "unrecoverable",
@@ -164,7 +170,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         ...(txReference || txStatus
           ? {
               payment: {
-                handler_id: handlerId || "prism_default",
+                ...(handlerId ? { handler_id: handlerId } : {}),
                 status: txStatus || "settled",
                 ...(txReference ? { transaction: txReference } : {}),
                 ...(txNetwork ? { network: txNetwork } : {}),
@@ -173,7 +179,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
           : {}),
       },
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
+    console.error(`[agentic-commerce] UCP checkout complete failed for ${id}: ${error instanceof Error ? error.message : String(error)}`)
     // On payment failure, refresh payment state
     try {
       await refreshPaymentCollectionForCartWorkflow(req.scope).run({
@@ -183,10 +190,11 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       // Best effort cleanup
     }
 
-    res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
-      code: "checkout_failed",
-      content: error.message,
+    res.status(422).json(formatUcpError({
+      ucpVersion,
+      code: "payment_failed",
+      content: "Payment could not be completed. Check the payment credential and retry.",
+      severity: "unrecoverable",
     }))
   }
 }

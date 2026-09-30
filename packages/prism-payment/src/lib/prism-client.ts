@@ -44,11 +44,23 @@ export type UcpHandlerDiscoveryEntry = {
   version: string
   spec: string
   schema: string
+  available_instruments: { type: string }[]
   config: unknown
 }
 
 /** UCP discovery response: `{ "xyz.fd.prism_payment": [...] }` */
 export type UcpHandlersDiscoveryResponse = Record<string, UcpHandlerDiscoveryEntry[]>
+
+const PRISM_UCP_HANDLER_ID = "xyz.fd.prism_payment"
+
+export function isContractEntry(data: unknown): data is UcpHandlersDiscoveryResponse {
+  if (typeof data !== "object" || data === null) return false
+  const entries = (data as Record<string, unknown>)[PRISM_UCP_HANDLER_ID]
+  const entry = Array.isArray(entries) ? (entries[0] as Record<string, unknown> | undefined) : undefined
+  if (typeof entry !== "object" || entry === null) return false
+  const nonEmpty = (key: string) => typeof entry[key] === "string" && (entry[key] as string).length > 0
+  return entry.id === PRISM_UCP_HANDLER_ID && nonEmpty("version") && nonEmpty("spec") && nonEmpty("schema")
+}
 
 /** A single UCP checkout-prepare entry — same namespace keying, smaller shape */
 export type UcpCheckoutHandlerEntry = {

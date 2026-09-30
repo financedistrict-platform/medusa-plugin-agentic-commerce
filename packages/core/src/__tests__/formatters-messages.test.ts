@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest"
+import { UCP_VERSION } from "../lib/ucp-version"
 import { formatUcpCheckoutSession } from "../lib/formatters/ucp"
 import { formatAcpCheckoutSession } from "../lib/formatters/acp"
 
 const ctx = {
   storeName: "Test Store",
   storefrontUrl: "https://store.test",
-  ucpVersion: "2026-04-08",
+  ucpVersion: UCP_VERSION,
   acpVersion: "2026-01-30",
   paymentHandlers: {
     getUcpCheckoutHandlers: () => ({}),

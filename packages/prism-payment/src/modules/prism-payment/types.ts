@@ -139,6 +139,17 @@ export type PrismPaymentConfig = {
  */
 export const PRISM_HANDLER_ID = "xyz.fd.prism_payment"
 
+export const PRISM_INSTRUMENT_TYPE = "x402"
+
+export function isX402Instrument(instrumentType: unknown, credential: unknown): boolean {
+  return (
+    instrumentType === PRISM_INSTRUMENT_TYPE &&
+    typeof credential === "object" &&
+    credential !== null &&
+    (credential as Record<string, unknown>).type === PRISM_INSTRUMENT_TYPE
+  )
+}
+
 export const PRISM_INSTRUMENT_SCHEMA = {
   type: "eip3009_authorization",
   credential_schema: {

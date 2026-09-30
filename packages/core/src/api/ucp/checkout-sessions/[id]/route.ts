@@ -7,8 +7,7 @@ import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../../lib/list-shipping-options"
 import { extractSelectedFulfillmentOptionId } from "../../../../lib/formatters/ucp-fulfillment"
-
-const UCP_VERSION = "2026-04-08"
+import { ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -23,7 +22,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
     if (!cart) {
       res.status(404).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "not_found",
         content: "Checkout session not found",
       }))
@@ -38,7 +37,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     res.json(session)
   } catch (error: any) {
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: error.message,
     }))
@@ -85,7 +84,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
       )
       if (!resolution.supported) {
         res.status(400).json(formatUcpError({
-          ucpVersion: UCP_VERSION,
+          ucpVersion: ucpVersionFor(req.scope),
           code: "country_not_supported",
           content: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${resolution.supportedCountries.join(", ") || "(none configured)"}.`,
           severity: "recoverable",
@@ -119,7 +118,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
 
     if (!cart) {
       res.status(404).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "not_found",
         content: "Checkout session not found",
       }))
@@ -158,7 +157,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     const msg: string = error?.message || ""
     if (/Country with code .* is not within region/i.test(msg)) {
       res.status(400).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "country_not_supported",
         content: msg,
         severity: "recoverable",
@@ -167,7 +166,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
       return
     }
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: msg || "Internal error",
     }))

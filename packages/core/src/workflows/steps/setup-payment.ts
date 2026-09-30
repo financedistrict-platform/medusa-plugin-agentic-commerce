@@ -80,6 +80,9 @@ export const setupPaymentStep = createStep(
         if (input.payment_data.x402_version) {
           sessionData.x402_version = input.payment_data.x402_version
         }
+        if (input.payment_data.instrument_type) {
+          sessionData.instrument_type = input.payment_data.instrument_type
+        }
       }
 
       // Legacy: pass flat token for backwards compatibility
