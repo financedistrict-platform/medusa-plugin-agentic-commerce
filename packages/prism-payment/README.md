@@ -101,8 +101,12 @@ You should see:
 {
   "xyz.fd.prism_payment": [
     {
-      "id": "x402",
-      "version": "2026-01-15"
+      "id": "xyz.fd.prism_payment",
+      "version": "2026-10-07",
+      "spec": "https://prism-gw.fd.xyz/ucp/prism.md",
+      "schema": "https://prism-gw.fd.xyz/ucp/schema.json",
+      "available_instruments": [{ "type": "x402" }],
+      "config": {}
     }
   ]
 }

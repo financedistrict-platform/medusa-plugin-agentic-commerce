@@ -18,6 +18,7 @@
 import type { PaymentHandlerAdapter, CheckoutPrepareInput } from "@financedistrict/medusa-plugin-agentic-commerce"
 import {
   PrismClient,
+  isContractEntry,
   type AcpHandler,
   type PaymentHandlerConfig,
   type UcpCheckoutPrepareResponse,
@@ -76,6 +77,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   /** Cached ACP discovery response (5 min TTL) */
   private acpDiscoveryCache: { data: AcpHandler[]; expiry: number } | null = null
   private readonly DISCOVERY_TTL = 5 * 60 * 1000
+  private readonly DISCOVERY_FAILURE_TTL = 60 * 1000
 
   constructor(_container: Record<string, unknown>, options: PrismPaymentHandlerOptions = {}) {
     this.client = new PrismClient({
@@ -252,12 +254,21 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     }
     try {
       const data = await this.client.fetchUcpHandlers()
+      if (!isContractEntry(data)) {
+        console.error(`[prism-payment-handler] UCP discovery returned an invalid ${PRISM_HANDLER_ID} entry; handler omitted`)
+        return this.failUcpDiscovery(now)
+      }
       this.ucpDiscoveryCache = { data, expiry: now + this.DISCOVERY_TTL }
       return data
     } catch (error: unknown) {
       console.error(`[prism-payment-handler] UCP discovery failed: ${error}`)
-      return this.ucpDiscoveryCache?.data ?? {}
+      return this.failUcpDiscovery(now)
     }
+  }
+
+  private failUcpDiscovery(now: number): UcpHandlersDiscoveryResponse {
+    this.ucpDiscoveryCache = { data: {}, expiry: now + this.DISCOVERY_FAILURE_TTL }
+    return {}
   }
 
   private async fetchAcpDiscovery(): Promise<AcpHandler[]> {

@@ -12,10 +12,10 @@ describe("extractUcpPayment", () => {
         payment: {
           instruments: [{
             id: "inst_001",
-            handler_id: "prism_default",
-            type: "default",
+            handler_id: "xyz.fd.prism_payment",
+            type: "x402",
             credential: {
-              type: "default",
+              type: "x402",
               authorization: "base64-encoded-auth-data",
               x402_version: 2,
             },
@@ -26,13 +26,14 @@ describe("extractUcpPayment", () => {
       expect(result).toEqual({
         eip3009Authorization: "base64-encoded-auth-data",
         x402Version: 2,
-        handlerId: "prism_default",
+        handlerId: "xyz.fd.prism_payment",
+        instrumentType: "x402",
       })
     })
 
     it("extracts from full x402 paymentPayload structure", () => {
       const credential = {
-        type: "default",
+        type: "x402",
         paymentPayload: {
           signature: "0xabc",
           authorization: {
@@ -52,8 +53,8 @@ describe("extractUcpPayment", () => {
         payment: {
           instruments: [{
             id: "inst_002",
-            handler_id: "prism_default",
-            type: "default",
+            handler_id: "xyz.fd.prism_payment",
+            type: "x402",
             credential,
           }],
         },
@@ -65,7 +66,8 @@ describe("extractUcpPayment", () => {
       expect(decoded.paymentPayload.signature).toBe("0xabc")
       expect(decoded.paymentRequirements.scheme).toBe("exact")
       expect(result!.x402Version).toBe(2)
-      expect(result!.handlerId).toBe("prism_default")
+      expect(result!.handlerId).toBe("xyz.fd.prism_payment")
+      expect(result!.instrumentType).toBe("x402")
     })
 
     it("uses first instrument when multiple are provided", () => {
@@ -75,13 +77,13 @@ describe("extractUcpPayment", () => {
             {
               id: "inst_first",
               handler_id: "handler_a",
-              type: "default",
+              type: "x402",
               credential: { authorization: "auth-first" },
             },
             {
               id: "inst_second",
               handler_id: "handler_b",
-              type: "default",
+              type: "x402",
               credential: { authorization: "auth-second" },
             },
           ],
@@ -97,8 +99,8 @@ describe("extractUcpPayment", () => {
         payment: {
           instruments: [{
             id: "inst_003",
-            handler_id: "prism_default",
-            type: "default",
+            handler_id: "xyz.fd.prism_payment",
+            type: "x402",
           }],
         },
       })
@@ -111,9 +113,9 @@ describe("extractUcpPayment", () => {
         payment: {
           instruments: [{
             id: "inst_004",
-            handler_id: "prism_default",
-            type: "default",
-            credential: { type: "default" },
+            handler_id: "xyz.fd.prism_payment",
+            type: "x402",
+            credential: { type: "x402" },
           }],
         },
       })

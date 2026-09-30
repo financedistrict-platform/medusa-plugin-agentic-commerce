@@ -55,6 +55,7 @@ const completeCheckoutSessionWorkflow = createWorkflow(
               eip3009_authorization: authorization || legacyToken,
               x402_version: input.payment_data?.x402_version,
               handler_id: input.payment_data?.handler_id,
+              instrument_type: input.payment_data?.instrument_type,
             }
           : undefined,
       }

@@ -4,8 +4,7 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
 import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
-
-const UCP_VERSION = "2026-04-08"
+import { ucpVersionFor } from "../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const body = req.validatedBody as any
@@ -31,7 +30,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         currency_code: currencyCode,
         protocol: "ucp",
         agent_identifier: agentIdentifier,
-        protocol_version: UCP_VERSION,
+        protocol_version: ucpVersionFor(req.scope),
         session_fingerprint: computeSessionFingerprint(req),
       },
     })
@@ -51,7 +50,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     res.status(201).json(formatted)
   } catch (error: any) {
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: error.message,
     }))

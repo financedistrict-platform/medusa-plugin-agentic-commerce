@@ -4,8 +4,7 @@ import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../lib/cart-fields"
 import { ucpAddressToMedusa } from "../../../../lib/address-translator"
 import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
-
-const UCP_VERSION = "2026-04-08"
+import { ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -20,7 +19,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
     if (!cart) {
       res.status(404).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "not_found",
         content: "Cart not found",
       }))
@@ -34,7 +33,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     res.json(formatted)
   } catch (error: any) {
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: error.message,
     }))
@@ -80,7 +79,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
 
     if (!cart) {
       res.status(404).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "not_found",
         content: "Cart not found",
       }))
@@ -94,7 +93,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     res.json(formatted)
   } catch (error: any) {
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: error.message,
     }))

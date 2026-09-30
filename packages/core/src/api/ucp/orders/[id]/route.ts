@@ -2,8 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ORDER_FIELDS, FULFILLMENT_FIELDS } from "../../../../lib/order-fields"
 import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
-
-const UCP_VERSION = "2026-04-08"
+import { ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -18,7 +17,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
     if (!order) {
       res.status(404).json(formatUcpError({
-        ucpVersion: UCP_VERSION,
+        ucpVersion: ucpVersionFor(req.scope),
         code: "not_found",
         content: "Order not found",
       }))
@@ -44,7 +43,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     res.json(formatted)
   } catch (error: any) {
     res.status(500).json(formatUcpError({
-      ucpVersion: UCP_VERSION,
+      ucpVersion: ucpVersionFor(req.scope),
       code: "internal_error",
       content: error.message,
     }))
