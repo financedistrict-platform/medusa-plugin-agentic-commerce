@@ -141,13 +141,13 @@ export const PRISM_HANDLER_ID = "xyz.fd.prism_payment"
 
 export const PRISM_INSTRUMENT_TYPE = "x402"
 
+const ACCEPTED_INSTRUMENT_TYPES: readonly unknown[] = [PRISM_INSTRUMENT_TYPE, "tokenized", "default", undefined]
+
 export function isX402Instrument(instrumentType: unknown, credential: unknown): boolean {
-  return (
-    instrumentType === PRISM_INSTRUMENT_TYPE &&
-    typeof credential === "object" &&
-    credential !== null &&
-    (credential as Record<string, unknown>).type === PRISM_INSTRUMENT_TYPE
-  )
+  if (!ACCEPTED_INSTRUMENT_TYPES.includes(instrumentType)) return false
+  if (typeof credential !== "object" || credential === null) return false
+  const credentialType = (credential as Record<string, unknown>).type
+  return credentialType === undefined || credentialType === PRISM_INSTRUMENT_TYPE
 }
 
 export const PRISM_INSTRUMENT_SCHEMA = {

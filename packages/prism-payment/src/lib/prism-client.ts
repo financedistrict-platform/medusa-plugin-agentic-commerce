@@ -19,6 +19,8 @@
  *   api_key  — Merchant API key from Prism Console
  */
 
+import { readPackageVersion } from "./package-version"
+
 // =====================================================
 // Shared payment-requirements input
 // =====================================================
@@ -44,7 +46,9 @@ export type UcpHandlerDiscoveryEntry = {
   version: string
   spec: string
   schema: string
-  available_instruments: { type: string }[]
+  available_instruments?: { type: string }[]
+  config_schema?: string
+  instrument_schemas?: string[]
   config: unknown
 }
 
@@ -52,14 +56,35 @@ export type UcpHandlerDiscoveryEntry = {
 export type UcpHandlersDiscoveryResponse = Record<string, UcpHandlerDiscoveryEntry[]>
 
 const PRISM_UCP_HANDLER_ID = "xyz.fd.prism_payment"
+const PRISM_UCP_HANDLER_IDS: readonly unknown[] = [PRISM_UCP_HANDLER_ID, "x402"]
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
+function canonicalEntry(entry: unknown): UcpHandlerDiscoveryEntry | null {
+  if (typeof entry !== "object" || entry === null) return null
+  const raw = entry as Record<string, unknown>
+  const schema = nonEmptyString(raw.schema) ? raw.schema : raw.config_schema
+  if (!PRISM_UCP_HANDLER_IDS.includes(raw.id)) return null
+  if (!nonEmptyString(raw.version) || !nonEmptyString(raw.spec) || !nonEmptyString(schema)) return null
+  if (raw.available_instruments !== undefined && !Array.isArray(raw.available_instruments)) return null
+  if (raw.instrument_schemas !== undefined && !Array.isArray(raw.instrument_schemas)) return null
+  return { ...raw, id: PRISM_UCP_HANDLER_ID, schema } as UcpHandlerDiscoveryEntry
+}
+
+export function normalizeUcpHandlers(data: unknown): UcpHandlersDiscoveryResponse | null {
+  if (typeof data !== "object" || data === null) return null
+  const response = data as Record<string, unknown>
+  const entries = response[PRISM_UCP_HANDLER_ID]
+  if (!Array.isArray(entries) || entries.length === 0) return null
+  const canonical = entries.map(canonicalEntry)
+  if (canonical.some((entry) => entry === null)) return null
+  return { ...(response as UcpHandlersDiscoveryResponse), [PRISM_UCP_HANDLER_ID]: canonical as UcpHandlerDiscoveryEntry[] }
+}
 
 export function isContractEntry(data: unknown): data is UcpHandlersDiscoveryResponse {
-  if (typeof data !== "object" || data === null) return false
-  const entries = (data as Record<string, unknown>)[PRISM_UCP_HANDLER_ID]
-  const entry = Array.isArray(entries) ? (entries[0] as Record<string, unknown> | undefined) : undefined
-  if (typeof entry !== "object" || entry === null) return false
-  const nonEmpty = (key: string) => typeof entry[key] === "string" && (entry[key] as string).length > 0
-  return entry.id === PRISM_UCP_HANDLER_ID && nonEmpty("version") && nonEmpty("spec") && nonEmpty("schema")
+  return normalizeUcpHandlers(data) !== null
 }
 
 /** A single UCP checkout-prepare entry — same namespace keying, smaller shape */
@@ -127,6 +152,10 @@ export type X402AcceptEntry = {
 // Client
 // =====================================================
 
+function userAgent(): string {
+  return `fd-medusa-prism/${readPackageVersion()}`
+}
+
 export type PrismClientOptions = {
   apiUrl?: string
   apiKey?: string
@@ -149,12 +178,17 @@ export class PrismClient {
    * Fetch UCP handler descriptors for `.well-known/ucp` discovery.
    * Returns the raw Prism response keyed by handler namespace.
    */
-  async fetchUcpHandlers(): Promise<UcpHandlersDiscoveryResponse> {
+  async fetchUcpHandlers(ucpVersion?: string): Promise<UcpHandlersDiscoveryResponse> {
     if (!this.apiKey) {
       console.warn("[prism-client] No PRISM_API_KEY configured, returning empty UCP handlers")
       return {}
     }
-    return this.get<UcpHandlersDiscoveryResponse>("/api/v2/merchant/ucp/handlers")
+    const query = ucpVersion ? `?ucp_version=${encodeURIComponent(ucpVersion)}` : ""
+    return this.get<UcpHandlersDiscoveryResponse>(`/api/v2/merchant/ucp/handlers${query}`)
+  }
+
+  getApiUrl(): string {
+    return this.apiUrl
   }
 
   /**
@@ -220,7 +254,7 @@ export class PrismClient {
   private async get<T>(path: string): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "GET",
-      headers: { "X-API-Key": this.apiKey },
+      headers: { "X-API-Key": this.apiKey, "User-Agent": userAgent() },
     })
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error")
@@ -236,6 +270,7 @@ export class PrismClient {
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": this.apiKey,
+        "User-Agent": userAgent(),
       },
       body: JSON.stringify(body),
     })

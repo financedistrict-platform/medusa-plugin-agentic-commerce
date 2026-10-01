@@ -27,11 +27,17 @@ const credential = {
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64")
 
 describe("isX402Instrument", () => {
-  it("requires x402 on both the instrument and the credential", () => {
+  it("accepts x402 and the original-era instrument types with an x402 or untyped credential", () => {
     expect(isX402Instrument("x402", { type: "x402" })).toBe(true)
-    expect(isX402Instrument("tokenized", { type: "x402" })).toBe(false)
+    expect(isX402Instrument("tokenized", { type: "x402" })).toBe(true)
+    expect(isX402Instrument("default", {})).toBe(true)
+    expect(isX402Instrument(undefined, {})).toBe(true)
+    expect(isX402Instrument("x402", {})).toBe(true)
+  })
+
+  it("rejects other instrument types, other credential types and a missing credential", () => {
+    expect(isX402Instrument("card", { type: "x402" })).toBe(false)
     expect(isX402Instrument("x402", { type: "tokenized" })).toBe(false)
-    expect(isX402Instrument("x402", {})).toBe(false)
     expect(isX402Instrument("x402", null)).toBe(false)
   })
 })
@@ -59,8 +65,7 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
   })
 
   it.each([
-    ["instrument type tokenized", "tokenized", credential],
-    ["credential without type", "x402", { ...credential, type: undefined }],
+    ["instrument type card", "card", credential],
     ["credential type tokenized", "x402", { ...credential, type: "tokenized" }],
   ])("rejects %s before settling", async (_label, instrumentType, cred) => {
     const result = await provider.authorizePayment({
