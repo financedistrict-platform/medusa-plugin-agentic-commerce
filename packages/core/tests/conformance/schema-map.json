@@ -1,0 +1,125 @@
+{
+  "2026-01-23": {
+    "profile": {
+      "ref": "https://ucp.dev/schemas/ucp.json#/$defs/business_schema",
+      "instance_pointer": "/ucp",
+      "each": false
+    },
+    "checkout": {
+      "ref": "https://ucp.dev/schemas/shopping/checkout.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "order": {
+      "ref": "https://ucp.dev/schemas/shopping/order.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "error": {
+      "ref": "https://ucp.dev/schemas/shopping/types/message_error.json",
+      "instance_pointer": "/messages",
+      "each": true
+    }
+  },
+  "2026-04-08": {
+    "profile": {
+      "ref": "https://ucp.dev/schemas/ucp.json#/$defs/business_schema",
+      "instance_pointer": "/ucp",
+      "each": false
+    },
+    "checkout": {
+      "ref": "https://ucp.dev/schemas/shopping/checkout.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "cart": {
+      "ref": "https://ucp.dev/schemas/shopping/cart.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "order": {
+      "ref": "https://ucp.dev/schemas/shopping/order.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "catalog_search": {
+      "ref": "https://ucp.dev/schemas/shopping/catalog_search.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "catalog_lookup": {
+      "ref": "https://ucp.dev/schemas/shopping/catalog_lookup.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "error": {
+      "ref": "https://ucp.dev/schemas/shopping/types/error_response.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "known_deviations": {
+      "order__get.json": {
+        "reason": "original 0.1.12 bytes kept byte-equal under the D4 golden rule",
+        "violations": [
+          [
+            "$",
+            "required"
+          ],
+          [
+            "$.line_items.0",
+            "required"
+          ],
+          [
+            "$.line_items.0.quantity",
+            "type"
+          ],
+          [
+            "$.line_items.1",
+            "required"
+          ],
+          [
+            "$.line_items.1.quantity",
+            "type"
+          ]
+        ]
+      }
+    }
+  },
+  "2026-08-25": {
+    "profile": {
+      "ref": "https://ucp.dev/schemas/profile.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "checkout": {
+      "ref": "https://ucp.dev/schemas/shopping/checkout.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "cart": {
+      "ref": "https://ucp.dev/schemas/shopping/cart.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "order": {
+      "ref": "https://ucp.dev/schemas/shopping/order.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "catalog_search": {
+      "ref": "https://ucp.dev/schemas/shopping/catalog_search.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "catalog_lookup": {
+      "ref": "https://ucp.dev/schemas/shopping/catalog_lookup.json",
+      "instance_pointer": "",
+      "each": false
+    },
+    "error": {
+      "ref": "https://ucp.dev/schemas/common/types/error_response.json",
+      "instance_pointer": "",
+      "each": false
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "ucp": {
+    "version": "2026-04-08",
+    "services": {
+      "dev.ucp.shopping": [
+        {
+          "version": "2026-04-08",
+          "transport": "rest",
+          "endpoint": "https://store.test/ucp"
+        }
+      ]
+    },
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.catalog.lookup": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.checkout": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.cart": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.order": [
+        {
+          "version": "2026-04-08"
+        }
+      ]
+    },
+    "payment_handlers": {
+      "xyz.fd.prism_payment": [
+        {
+          "id": "xyz.fd.prism_payment",
+          "version": "2026-01-15",
+          "spec": "https://gw.example/ucp/prism.md",
+          "config_schema": "https://gw.example/ucp/schema.json",
+          "instrument_schemas": [
+            "https://gw.example/ucp/instrument_schema.json"
+          ],
+          "config": {}
+        }
+      ]
+    }
+  }
+}

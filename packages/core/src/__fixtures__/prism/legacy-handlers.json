@@ -1,0 +1,14 @@
+{
+  "xyz.fd.prism_payment": [
+    {
+      "id": "x402",
+      "version": "2026-01-15",
+      "spec": "https://gw.example/ucp/prism.md",
+      "config_schema": "https://gw.example/ucp/schema.json",
+      "instrument_schemas": [
+        "https://gw.example/ucp/instrument_schema.json"
+      ],
+      "config": {}
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "ucp": {
+    "version": "2026-04-08",
+    "services": {
+      "dev.ucp.shopping": [
+        {
+          "version": "2026-04-08",
+          "transport": "rest",
+          "endpoint": "https://store.test/ucp"
+        }
+      ]
+    },
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.catalog.lookup": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.checkout": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.cart": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.order": [
+        {
+          "version": "2026-04-08"
+        }
+      ]
+    },
+    "payment_handlers": {}
+  }
+}

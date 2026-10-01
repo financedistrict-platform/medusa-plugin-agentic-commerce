@@ -1,0 +1,49 @@
+{
+  "order": {
+    "id": "order_01",
+    "display_id": 1001,
+    "cart_id": "cart_01",
+    "status": "pending",
+    "fulfillment_status": "not_fulfilled",
+    "email": "ada@example.com",
+    "currency_code": "usd",
+    "created_at": "2026-09-30T10:20:00.000Z",
+    "updated_at": "2026-09-30T10:20:00.000Z",
+    "items": [
+      {
+        "id": "ordli_01",
+        "variant_id": "variant_mug",
+        "title": "Ceramic Mug",
+        "product_title": "Ceramic Mug",
+        "unit_price": 12.5,
+        "quantity": 2
+      },
+      {
+        "id": "ordli_02",
+        "variant_id": "variant_tee",
+        "title": "Logo Tee",
+        "product_title": "Logo Tee",
+        "unit_price": 25,
+        "quantity": 1
+      }
+    ],
+    "shipping_address": {
+      "id": "caaddr_01",
+      "first_name": "Ada",
+      "last_name": "Lovelace",
+      "address_1": "12 Analytical Row",
+      "address_2": null,
+      "city": "London",
+      "province": "Greater London",
+      "postal_code": "EC1A 1BB",
+      "country_code": "gb",
+      "phone": "+442071234567"
+    },
+    "subtotal": 50,
+    "shipping_total": 5,
+    "tax_total": 0,
+    "discount_total": 0,
+    "total": 55,
+    "fulfillments": []
+  }
+}
