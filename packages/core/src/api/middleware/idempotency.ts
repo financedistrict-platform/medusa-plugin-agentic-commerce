@@ -5,7 +5,7 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 import { Modules } from "@medusajs/framework/utils"
-import { ucpVersionFor } from "../../lib/ucp-version"
+import { ucpErrorFor } from "../../lib/ucp-version"
 
 const IDEMPOTENCY_TTL = 60 * 60 * 24 // 24 hours in seconds
 const PROCESSING_TTL = 60 // 1 minute lock while processing
@@ -82,15 +82,11 @@ export function createIdempotencyMiddleware(options: {
             message: "Idempotency-Key header is required for POST requests",
           })
         } else {
-          res.status(400).json({
-            ucp: { version: ucpVersionFor(req.scope), status: "error" },
-            messages: [{
-              type: "error",
-              code: "idempotency_key_required",
-              content: "Idempotency-Key header is required for mutating requests",
-              severity: "unrecoverable",
-            }],
-          })
+          res.status(400).json(ucpErrorFor(req, {
+            code: "idempotency_key_required",
+            content: "Idempotency-Key header is required for mutating requests",
+            severity: "unrecoverable",
+          }))
         }
         return
       }
@@ -126,15 +122,11 @@ export function createIdempotencyMiddleware(options: {
             message: "Idempotency-Key has already been used with a different request body",
           })
         } else {
-          res.status(422).json({
-            ucp: { version: ucpVersionFor(req.scope), status: "error" },
-            messages: [{
-              type: "error",
-              code: "idempotency_conflict",
-              content: "Idempotency-Key has already been used with a different request body",
-              severity: "unrecoverable",
-            }],
-          })
+          res.status(422).json(ucpErrorFor(req, {
+            code: "idempotency_conflict",
+            content: "Idempotency-Key has already been used with a different request body",
+            severity: "unrecoverable",
+          }))
         }
         return
       }
@@ -148,15 +140,11 @@ export function createIdempotencyMiddleware(options: {
             message: "A request with this Idempotency-Key is currently being processed",
           })
         } else {
-          res.status(409).set("Retry-After", "1").json({
-            ucp: { version: ucpVersionFor(req.scope), status: "error" },
-            messages: [{
-              type: "error",
-              code: "idempotency_in_flight",
-              content: "A request with this Idempotency-Key is currently being processed",
-              severity: "unrecoverable",
-            }],
-          })
+          res.status(409).set("Retry-After", "1").json(ucpErrorFor(req, {
+            code: "idempotency_in_flight",
+            content: "A request with this Idempotency-Key is currently being processed",
+            severity: "unrecoverable",
+          }))
         }
         return
       }

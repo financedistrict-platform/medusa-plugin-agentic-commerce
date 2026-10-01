@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { UCP_VERSION } from "../lib/ucp-version"
+import { createUcpVersionRegistry } from "../lib/ucp-version-registry"
 import {
   buildUcpFulfillment,
   extractSelectedFulfillmentOptionId,
@@ -12,7 +13,7 @@ import { UpdateUcpCheckoutSessionSchema } from "../api/validation-schemas"
 const ctx = {
   storeName: "Test Store",
   storefrontUrl: "https://store.test",
-  ucpVersion: UCP_VERSION,
+  ucpWire: createUcpVersionRegistry().wire(UCP_VERSION),
   acpVersion: "2026-01-30",
   paymentHandlers: {
     getUcpCheckoutHandlers: () => ({}),

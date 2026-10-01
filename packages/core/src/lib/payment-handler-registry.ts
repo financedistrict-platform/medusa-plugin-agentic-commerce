@@ -56,11 +56,11 @@ export class PaymentHandlerRegistry {
    * Get combined UCP payment handler definitions from all adapters.
    * Returns merged namespace-keyed object.
    */
-  async getUcpDiscoveryHandlers(): Promise<Record<string, unknown[]>> {
+  async getUcpDiscoveryHandlers(ucpVersion?: string): Promise<Record<string, unknown[]>> {
     if (this.adapters.length === 0) return {}
 
     const results = await Promise.allSettled(
-      this.adapters.map((a) => a.getUcpDiscoveryHandlers())
+      this.adapters.map((a) => a.getUcpDiscoveryHandlers(ucpVersion))
     )
 
     const merged: Record<string, unknown[]> = {}

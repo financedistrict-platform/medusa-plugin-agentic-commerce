@@ -225,10 +225,10 @@ export const UpdateUcpCheckoutSessionSchema = z.object({
  * Matches the UCP spec: checkout.json → payment.json → payment_instrument.json
  */
 const UcpPaymentInstrumentSchema = z.object({
-  id: z.string(),
-  handler_id: z.string(),
-  type: z.string(),
-  credential: z.object({ type: z.string() }).passthrough().optional(),
+  id: z.string().optional(),
+  handler_id: z.string().optional(),
+  type: z.string().optional(),
+  credential: z.object({ type: z.string().optional() }).passthrough().optional(),
 })
 
 /**

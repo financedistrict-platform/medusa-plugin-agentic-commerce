@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest"
 import { UCP_VERSION } from "../lib/ucp-version"
+import { createUcpVersionRegistry } from "../lib/ucp-version-registry"
 import { formatUcpCheckoutSession } from "../lib/formatters/ucp"
 import { formatAcpCheckoutSession } from "../lib/formatters/acp"
 
 const ctx = {
   storeName: "Test Store",
   storefrontUrl: "https://store.test",
-  ucpVersion: UCP_VERSION,
+  ucpWire: createUcpVersionRegistry().wire(UCP_VERSION),
   acpVersion: "2026-01-30",
   paymentHandlers: {
     getUcpCheckoutHandlers: () => ({}),

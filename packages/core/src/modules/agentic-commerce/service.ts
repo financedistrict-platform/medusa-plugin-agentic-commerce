@@ -19,7 +19,11 @@ import type { FormatterContext } from "../../lib/formatters/types"
 import { validateWebhookUrl } from "../../lib/validate-webhook-url"
 import * as ucpFormatter from "../../lib/formatters/ucp"
 import * as acpFormatter from "../../lib/formatters/acp"
-import { UCP_VERSION } from "../../lib/ucp-version"
+import {
+  createUcpVersionRegistry,
+  type UcpVersionNegotiation,
+  type UcpVersionRegistry,
+} from "../../lib/ucp-version-registry"
 
 export type AgenticCommerceOptions = {
   signatureKey?: string
@@ -29,6 +33,8 @@ export type AgenticCommerceOptions = {
   api_key?: string
   payment_provider_id?: string
   ucp_version?: string
+  ucp_supported_versions?: string[]
+  ucp_version_negotiation?: UcpVersionNegotiation
   acp_version?: string
   /**
    * Container service names of PaymentHandlerAdapter implementations.
@@ -50,6 +56,7 @@ export default class AgenticCommerceService {
   private apiKey: string
   private paymentProviderId: string
   private ucpVersion: string
+  private ucpRegistry: UcpVersionRegistry
   private acpVersion: string
   private paymentHandlerRegistry: PaymentHandlerRegistry
   private ctx: FormatterContext
@@ -71,7 +78,8 @@ export default class AgenticCommerceService {
     this.storeDescription = options.store_description || process.env.AGENTIC_STORE_DESCRIPTION || ""
     this.apiKey = options.api_key || process.env.AGENTIC_COMMERCE_API_KEY || ""
     this.paymentProviderId = options.payment_provider_id || process.env.AGENTIC_PAYMENT_PROVIDER || "pp_system_default"
-    this.ucpVersion = options.ucp_version || UCP_VERSION
+    this.ucpRegistry = createUcpVersionRegistry(options)
+    this.ucpVersion = this.ucpRegistry.current
     this.acpVersion = options.acp_version || "2026-01-30"
 
     this.paymentHandlerRegistry = new PaymentHandlerRegistry()
@@ -85,7 +93,7 @@ export default class AgenticCommerceService {
     this.ctx = {
       storeName: this.storeName,
       storefrontUrl: this.storefrontUrl,
-      ucpVersion: this.ucpVersion,
+      ucpWire: this.ucpRegistry.currentWire(),
       acpVersion: this.acpVersion,
       paymentHandlers: this.paymentHandlerRegistry,
     }
@@ -177,20 +185,25 @@ export default class AgenticCommerceService {
     return acpFormatter.formatAcpOrder(this.ctx, order, baseUrl)
   }
 
-  formatUcpCheckoutSession(cart: any, baseUrl: string, shippingOptions?: any[]) {
-    return ucpFormatter.formatUcpCheckoutSession(this.ctx, cart, baseUrl, shippingOptions)
+  formatUcpCheckoutSession(cart: any, baseUrl: string, shippingOptions?: any[], ucpVersion?: string) {
+    return ucpFormatter.formatUcpCheckoutSession(this.ucpContext(ucpVersion), cart, baseUrl, shippingOptions)
   }
 
-  formatUcpCart(cart: any, baseUrl: string) {
-    return ucpFormatter.formatUcpCart(this.ctx, cart, baseUrl)
+  formatUcpCart(cart: any, baseUrl: string, ucpVersion?: string) {
+    return ucpFormatter.formatUcpCart(this.ucpContext(ucpVersion), cart, baseUrl)
   }
 
   formatUcpProduct(product: any) {
     return ucpFormatter.formatUcpProduct(product)
   }
 
-  formatUcpOrder(order: any, baseUrl: string) {
-    return ucpFormatter.formatUcpOrder(this.ctx, order, baseUrl)
+  formatUcpOrder(order: any, baseUrl: string, ucpVersion?: string) {
+    return ucpFormatter.formatUcpOrder(this.ucpContext(ucpVersion), order, baseUrl)
+  }
+
+  private ucpContext(ucpVersion?: string): FormatterContext {
+    if (!ucpVersion || ucpVersion === this.ucpVersion) return this.ctx
+    return { ...this.ctx, ucpWire: this.ucpRegistry.wire(ucpVersion) }
   }
 
   // =====================================================
@@ -202,6 +215,7 @@ export default class AgenticCommerceService {
   getStoreDescription(): string { return this.storeDescription }
   getPaymentProviderId(): string { return this.paymentProviderId }
   getUcpVersion(): string { return this.ucpVersion }
+  getUcpRegistry(): UcpVersionRegistry { return this.ucpRegistry }
   getAcpVersion(): string { return this.acpVersion }
   getPaymentHandlerService(): PaymentHandlerRegistry {
     return this.paymentHandlerRegistry

@@ -2,9 +2,8 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import updateCheckoutSessionWorkflow from "../../../../workflows/update-checkout-session"
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../lib/cart-fields"
 import { ucpAddressToMedusa } from "../../../../lib/address-translator"
-import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
-import { ucpVersionFor } from "../../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -18,8 +17,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     })
 
     if (!cart) {
-      res.status(404).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(404).json(ucpErrorFor(req, {
         code: "not_found",
         content: "Cart not found",
       }))
@@ -28,12 +26,11 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/carts`
-    const formatted = agenticCommerceService.formatUcpCart(cart, baseUrl)
+    const formatted = agenticCommerceService.formatUcpCart(cart, baseUrl, ucpVersionFor(req))
 
     res.json(formatted)
   } catch (error: any) {
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: error.message,
     }))
@@ -78,8 +75,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     })
 
     if (!cart) {
-      res.status(404).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(404).json(ucpErrorFor(req, {
         code: "not_found",
         content: "Cart not found",
       }))
@@ -88,12 +84,11 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/carts`
-    const formatted = agenticCommerceService.formatUcpCart(cart, baseUrl)
+    const formatted = agenticCommerceService.formatUcpCart(cart, baseUrl, ucpVersionFor(req))
 
     res.json(formatted)
   } catch (error: any) {
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: error.message,
     }))

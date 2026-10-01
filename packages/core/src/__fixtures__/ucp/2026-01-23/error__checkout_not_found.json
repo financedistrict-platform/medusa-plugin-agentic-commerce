@@ -1,0 +1,14 @@
+{
+  "ucp": {
+    "version": "2026-01-23"
+  },
+  "status": "requires_escalation",
+  "messages": [
+    {
+      "type": "error",
+      "code": "not_found",
+      "content": "Checkout session not found",
+      "severity": "requires_buyer_input"
+    }
+  ]
+}

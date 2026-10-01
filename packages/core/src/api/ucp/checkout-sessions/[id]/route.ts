@@ -2,12 +2,11 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import updateCheckoutSessionWorkflow from "../../../../workflows/update-checkout-session"
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../lib/cart-fields"
 import { ucpAddressToMedusa } from "../../../../lib/address-translator"
-import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../../lib/list-shipping-options"
 import { extractSelectedFulfillmentOptionId } from "../../../../lib/formatters/ucp-fulfillment"
-import { ucpVersionFor } from "../../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -21,8 +20,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     })
 
     if (!cart) {
-      res.status(404).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(404).json(ucpErrorFor(req, {
         code: "not_found",
         content: "Checkout session not found",
       }))
@@ -32,12 +30,11 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/checkout-sessions`
     const shippingOptions = await listShippingOptionsSafe(req.scope, id)
-    const session = agenticCommerceService.formatUcpCheckoutSession(cart, baseUrl, shippingOptions)
+    const session = agenticCommerceService.formatUcpCheckoutSession(cart, baseUrl, shippingOptions, ucpVersionFor(req))
 
     res.json(session)
   } catch (error: any) {
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: error.message,
     }))
@@ -83,8 +80,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
         shippingAddress.country_code
       )
       if (!resolution.supported) {
-        res.status(400).json(formatUcpError({
-          ucpVersion: ucpVersionFor(req.scope),
+        res.status(400).json(ucpErrorFor(req, {
           code: "country_not_supported",
           content: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${resolution.supportedCountries.join(", ") || "(none configured)"}.`,
           severity: "recoverable",
@@ -117,8 +113,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     })
 
     if (!cart) {
-      res.status(404).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(404).json(ucpErrorFor(req, {
         code: "not_found",
         content: "Checkout session not found",
       }))
@@ -148,7 +143,8 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     const session = agenticCommerceService.formatUcpCheckoutSession(
       updatedCart || cart,
       baseUrl,
-      shippingOptions
+      shippingOptions,
+      ucpVersionFor(req),
     )
 
     res.json(session)
@@ -156,8 +152,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     // Translate well-known Medusa errors to spec-compliant UCP errors
     const msg: string = error?.message || ""
     if (/Country with code .* is not within region/i.test(msg)) {
-      res.status(400).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(400).json(ucpErrorFor(req, {
         code: "country_not_supported",
         content: msg,
         severity: "recoverable",
@@ -165,8 +160,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
       }))
       return
     }
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: msg || "Internal error",
     }))

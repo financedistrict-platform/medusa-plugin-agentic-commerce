@@ -1,0 +1,14 @@
+{
+  "ucp": {
+    "version": "2026-01-23"
+  },
+  "status": "requires_escalation",
+  "messages": [
+    {
+      "type": "error",
+      "code": "invalid_instrument",
+      "content": "handler_id must be xyz.fd.prism_payment",
+      "severity": "requires_buyer_input"
+    }
+  ]
+}

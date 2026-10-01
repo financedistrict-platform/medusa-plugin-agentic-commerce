@@ -46,7 +46,7 @@ export interface PaymentHandlerAdapter {
    * Keyed by handler namespace (e.g., "xyz.fd.prism_payment").
    * Return empty object if nothing to advertise.
    */
-  getUcpDiscoveryHandlers(): Promise<Record<string, unknown[]>>
+  getUcpDiscoveryHandlers(ucpVersion?: string): Promise<Record<string, unknown[]>>
 
   /**
    * Return ACP discovery handler entries for .well-known/acp.json.
