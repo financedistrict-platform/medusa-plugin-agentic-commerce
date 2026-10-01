@@ -5,7 +5,7 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 import { Modules } from "@medusajs/framework/utils"
-import { ucpErrorFor } from "../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../lib/ucp-version"
 
 const IDEMPOTENCY_TTL = 60 * 60 * 24 // 24 hours in seconds
 const PROCESSING_TTL = 60 // 1 minute lock while processing
@@ -23,8 +23,17 @@ function hashBody(body: unknown): string {
   return crypto.createHash("sha256").update(serialized).digest("hex")
 }
 
-function cacheKey(path: string, idempotencyKey: string, identity: string): string {
-  return `idempotency:${identity}:${path}:${idempotencyKey}`
+function cacheKey(path: string, idempotencyKey: string, identity: string, version: string | null): string {
+  const scope = version ? `${identity}:${version}` : identity
+  return `idempotency:${scope}:${path}:${idempotencyKey}`
+}
+
+function compatVersion(req: MedusaRequest, protocol: "acp" | "ucp"): string | null {
+  if (protocol !== "ucp") return null
+  const ucpRequest = req as unknown as UcpRequestLike
+  const version = ucpVersionFor(ucpRequest)
+  const current = (req.scope.resolve("agenticCommerce") as { getUcpVersion(): string }).getUcpVersion()
+  return version === current ? null : version
 }
 
 function extractIdentity(req: MedusaRequest): string {
@@ -106,7 +115,7 @@ export function createIdempotencyMiddleware(options: {
     }
 
     const identity = extractIdentity(req)
-    const key = cacheKey(req.path, idempotencyKey, identity)
+    const key = cacheKey(req.path, idempotencyKey, identity, compatVersion(req, options.protocol))
     const bodyHash = hashBody(req.body)
 
     // Check for existing cached response
