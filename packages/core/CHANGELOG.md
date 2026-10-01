@@ -1,5 +1,17 @@
 # @financedistrict/medusa-plugin-agentic-commerce
 
+## 1.0.0
+
+### Major Changes
+
+- [#22](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/22) [`c0c599d`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/c0c599d6f8a580d9b5d700ffa96c0fb733184f46) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Move UCP support to protocol version 2026-08-25.
+
+  - UCP 2026-08-25 is the default `ucp_version`. `/.well-known/ucp` and `/well-known/ucp` share one profile builder: every service and capability carries version 2026-08-25 with a `spec` and `schema`, catalog capabilities point at `catalog_search.json` / `catalog_lookup.json`, and `signing_keys` is no longer emitted.
+  - Payment handler entries from Prism are passed through unchanged. The Prism handler is advertised only when its `xyz.fd.prism_payment` entry has `id`, `version`, `spec` and `schema`; an invalid or unreachable response is logged and omitted instead of cached.
+  - On checkout complete, instrument `id`, `handler_id` and `type` are required, and a sent `credential` must carry `type`. Invalid bodies return 400 `invalid_instrument` in the UCP error shape.
+  - The Prism handler id is `xyz.fd.prism_payment` with instrument and credential type `x402`. When the Prism provider is configured, unknown handler ids and other types are rejected with 422 before any payment runs, and a cart with a Prism quote that cannot be matched to the signed payment is rejected instead of settled.
+  - Payment failures on complete return 422 `payment_failed` with a fixed message; details are logged server-side only.
+
 ## 0.1.12
 
 ### Patch Changes
