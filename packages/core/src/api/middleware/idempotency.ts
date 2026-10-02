@@ -30,10 +30,7 @@ function cacheKey(path: string, idempotencyKey: string, identity: string, versio
 
 function compatVersion(req: MedusaRequest, protocol: "acp" | "ucp"): string | null {
   if (protocol !== "ucp") return null
-  const ucpRequest = req as unknown as UcpRequestLike
-  const version = ucpVersionFor(ucpRequest)
-  const current = (req.scope.resolve("agenticCommerce") as { getUcpVersion(): string }).getUcpVersion()
-  return version === current ? null : version
+  return ucpVersionFor(req as unknown as UcpRequestLike)
 }
 
 function extractIdentity(req: MedusaRequest): string {

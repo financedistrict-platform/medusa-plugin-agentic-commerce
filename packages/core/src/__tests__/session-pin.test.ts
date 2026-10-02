@@ -5,7 +5,7 @@ import { createUcpVersionRegistry } from "../lib/ucp-version-registry"
 import { applyUcpSessionPin, type UcpResolution } from "../lib/ucp-version-resolver"
 import { ucpVersionFor, ucpWireFor } from "../lib/ucp-version"
 
-const registry = createUcpVersionRegistry()
+const registry = createUcpVersionRegistry({ ucp_version: "2026-04-08" })
 
 const resolution = (outcome: UcpResolution["outcome"], version: string, declared?: string): UcpResolution => ({
   version,
@@ -25,7 +25,7 @@ function pinMiddleware(): Middleware {
 }
 
 function pinRequest(metadata: Record<string, unknown> | undefined, ucp: UcpResolution) {
-  const service = new AgenticCommerceService({}, {})
+  const service = new AgenticCommerceService({}, { ucp_version: "2026-04-08" })
   const warnings: string[] = []
   const services: Record<string, unknown> = {
     agenticCommerce: service,

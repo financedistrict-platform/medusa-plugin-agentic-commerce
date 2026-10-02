@@ -3,9 +3,6 @@ import { wire20260123 } from "./ucp-wire/wire-2026-01-23"
 import { wire20260408 } from "./ucp-wire/wire-2026-04-08"
 import { wire20260825 } from "./ucp-wire/wire-2026-08-25"
 
-export const DEFAULT_CURRENT_UCP_VERSION = "2026-04-08"
-export const DEFAULT_SUPPORTED_UCP_VERSIONS: readonly string[] = ["2026-08-25", "2026-01-23"]
-
 export type UcpVersionNegotiation = "lenient" | "strict"
 
 export const UCP_VERSION_NEGOTIATION_MODES: readonly UcpVersionNegotiation[] = ["lenient", "strict"]
@@ -17,6 +14,12 @@ const WIRES: Record<string, UcpWire> = {
 }
 
 export const KNOWN_UCP_VERSIONS: readonly string[] = Object.keys(WIRES)
+
+export const LATEST_UCP_VERSION: string = [...KNOWN_UCP_VERSIONS].sort().reverse()[0]
+export const DEFAULT_CURRENT_UCP_VERSION = LATEST_UCP_VERSION
+export const DEFAULT_SUPPORTED_UCP_VERSIONS: readonly string[] = KNOWN_UCP_VERSIONS.filter(
+  (version) => version !== LATEST_UCP_VERSION
+)
 
 export type UcpVersionRegistryOptions = {
   ucp_version?: string
@@ -45,7 +48,7 @@ export function createUcpVersionRegistry(options: UcpVersionRegistryOptions = {}
     throw new Error(`Unknown UCP version: ${current}`)
   }
 
-  const requested = options.ucp_supported_versions ?? [...DEFAULT_SUPPORTED_UCP_VERSIONS]
+  const requested = options.ucp_supported_versions ?? KNOWN_UCP_VERSIONS
   for (const version of requested) {
     if (!isKnownUcpVersion(version)) {
       throw new Error(`Unknown supported UCP version: ${version}`)

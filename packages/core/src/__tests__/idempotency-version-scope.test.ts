@@ -80,11 +80,12 @@ describe("UCP idempotency across versions", () => {
     expect(executions()).toBe(2)
   })
 
-  it("keeps the cache key of a current-version caller unchanged", async () => {
+  it("scopes the cache key of a current-version caller by its version", async () => {
     const { cache, send } = harness()
     await send(CURRENT, "idem-3")
 
-    expect([...cache.entries.keys()].filter((key) => key.endsWith(`:${PATH}:idem-3`))).toHaveLength(1)
-    expect([...cache.entries.keys()].some((key) => key.includes(CURRENT))).toBe(false)
+    const keys = [...cache.entries.keys()].filter((key) => key.endsWith(`:${PATH}:idem-3`))
+    expect(keys).toHaveLength(1)
+    expect(keys[0]).toContain(`:${CURRENT}:`)
   })
 })

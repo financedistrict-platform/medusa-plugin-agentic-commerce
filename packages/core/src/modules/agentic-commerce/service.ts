@@ -82,6 +82,10 @@ export default class AgenticCommerceService {
     this.ucpVersion = this.ucpRegistry.current
     this.acpVersion = options.acp_version || "2026-01-30"
 
+    if (!options.ucp_version) {
+      console.info(`[agentic-commerce] ucp_version not set, serving the latest UCP version ${this.ucpVersion}. Set ucp_version to pin another.`)
+    }
+
     this.paymentHandlerRegistry = new PaymentHandlerRegistry()
     this.adapterNames = options.payment_handler_adapters || []
 

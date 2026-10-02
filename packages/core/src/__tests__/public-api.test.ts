@@ -47,7 +47,7 @@ describe("public API of @financedistrict/medusa-plugin-agentic-commerce", () => 
 
   it("adds the version registry", () => {
     expect(typeof core.createUcpVersionRegistry).toBe("function")
-    expect(core.DEFAULT_CURRENT_UCP_VERSION).toBe("2026-04-08")
+    expect(core.DEFAULT_CURRENT_UCP_VERSION).toBe("2026-08-25")
   })
 })
 

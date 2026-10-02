@@ -121,7 +121,7 @@ UCP is designed for **agent-to-merchant** interactions. It uses a shopping-cart 
 
 **Required headers:** `UCP-Agent`, `Request-Id`
 
-**Versions:** the store serves `ucp_version` (default `2026-04-08`) plus every version in `ucp_supported_versions` (default `2026-08-25`, `2026-01-23`). The version for a request comes from the `ucp.version` of the agent profile named in `UCP-Agent: ...; profile="https://..."`. The profile is fetched over HTTPS only, from public addresses only, with a 3 s timeout, a 64 KiB cap and no redirects, and cached for 10 minutes.
+**Versions:** the store serves `ucp_version` (default: the latest version, currently `2026-08-25`) plus every version in `ucp_supported_versions` (default: every other known version, currently `2026-04-08`, `2026-01-23`). The version for a request comes from the `ucp.version` of the agent profile named in `UCP-Agent: ...; profile="https://..."`. The profile is fetched over HTTPS only, from public addresses only, with a 3 s timeout, a 64 KiB cap and no redirects, and cached for 10 minutes.
 
 | Agent profile | `lenient` (default) | `strict` |
 |---|---|---|
@@ -300,7 +300,7 @@ import {
 | `store_description` | `string` | `""` | Store description for discovery |
 | `payment_provider_id` | `string` | `"pp_system_default"` | Medusa payment provider ID |
 | `payment_handler_adapters` | `string[]` | `[]` | Module keys of payment handler adapters |
-| `ucp_version` | `string` | `"2026-04-08"` | Current UCP version, served when the agent declares none |
+| `ucp_version` | `string` | latest (`"2026-08-25"`) | Current UCP version, served when the agent declares none. Set `"2026-04-08"` to keep the root profile of 0.x releases |
 | `ucp_supported_versions` | `string[]` | `["2026-08-25", "2026-01-23"]` | Further UCP versions served on request; the current version is removed from this list |
 | `ucp_version_negotiation` | `"lenient" \| "strict"` | `"lenient"` | How an unusable agent profile is handled (see UCP above) |
 | `acp_version` | `string` | `"2026-01-30"` | ACP protocol version to advertise |

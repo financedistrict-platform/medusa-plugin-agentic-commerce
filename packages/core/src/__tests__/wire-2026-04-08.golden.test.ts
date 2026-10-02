@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs"
 import { join } from "node:path"
 import { describe, it, expect, beforeAll } from "vitest"
-import { DEFAULT_SUPPORTED_UCP_VERSIONS } from "../lib/ucp-version-registry"
+import { KNOWN_UCP_VERSIONS } from "../lib/ucp-version-registry"
 import { readFixture, renderFixtures, serialize, UCP_FIXTURES, type RenderedFixtures } from "./helpers/render-wire"
 
 const VERSION = "2026-04-08"
@@ -22,13 +22,14 @@ describe("2026-04-08 wire against the 0.1.12 goldens with an empty payment regis
     expect(serialize(rendered[name])).toBe(readFixture(VERSION, name))
   })
 
-  it("adds only ucp.supported_versions to the profile with the default supported list", async () => {
-    const withSupported = await renderFixtures({ version: VERSION, supported: [...DEFAULT_SUPPORTED_UCP_VERSIONS] })
+  it("adds only ucp.supported_versions to the profile with the other known versions supported", async () => {
+    const otherVersions = KNOWN_UCP_VERSIONS.filter((v) => v !== VERSION)
+    const withSupported = await renderFixtures({ version: VERSION, supported: otherVersions })
     const profile = withSupported["profile.json"] as { ucp: Record<string, unknown> }
     const original = JSON.parse(readFixture(VERSION, "profile.json"))
 
     expect(profile.ucp.supported_versions).toEqual(Object.fromEntries(
-      DEFAULT_SUPPORTED_UCP_VERSIONS.map((v) => [v, `https://store.test/.well-known/ucp/${v}`]),
+      otherVersions.map((v) => [v, `https://store.test/.well-known/ucp/${v}`]),
     ))
     const { supported_versions: _added, ...rest } = profile.ucp
     expect(serialize({ ...profile, ucp: rest })).toBe(serialize(original))

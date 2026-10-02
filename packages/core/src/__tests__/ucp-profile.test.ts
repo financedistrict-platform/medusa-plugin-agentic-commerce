@@ -25,7 +25,7 @@ describe("buildUcpProfile", () => {
 
   it("uses 2026-08-25 for the 2026-08-25 wire profile and every dev.ucp entry", () => {
     expect(WIRE_VERSION).toBe("2026-08-25")
-    expect(UCP_VERSION).toBe("2026-04-08")
+    expect(UCP_VERSION).toBe("2026-08-25")
     expect(profile.ucp.version).toBe(WIRE_VERSION)
     for (const entry of entries) {
       expect(entry.version).toBe(WIRE_VERSION)

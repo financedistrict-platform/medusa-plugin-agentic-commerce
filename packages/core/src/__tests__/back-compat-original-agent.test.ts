@@ -16,7 +16,7 @@ function middlewareOf(matcher: string, name: string): Middleware {
 }
 
 function originalRequest(headers: Record<string, string>) {
-  const service = new AgenticCommerceService({}, { store_name: "Demo Store", payment_provider_id: "pp_prism_prism" })
+  const service = new AgenticCommerceService({}, { store_name: "Demo Store", payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08" })
   const services: Record<string, unknown> = { agenticCommerce: service, logger: { warn: () => undefined } }
   return { headers, path: "/ucp/checkout-sessions/cart_01/complete", params: { id: "cart_01" }, scope: { resolve: (n: string) => services[n] } } as any
 }

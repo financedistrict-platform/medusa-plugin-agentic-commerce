@@ -24,9 +24,9 @@ function fixtureFetcher(body: string | null): AgentProfileFetcher {
   }
 }
 
-const lenient = createUcpVersionRegistry()
-const strict = createUcpVersionRegistry({ ucp_version_negotiation: "strict" })
-const withoutLegacy = createUcpVersionRegistry({ ucp_supported_versions: ["2026-08-25"] })
+const lenient = createUcpVersionRegistry({ ucp_version: "2026-04-08" })
+const strict = createUcpVersionRegistry({ ucp_version: "2026-04-08", ucp_version_negotiation: "strict" })
+const withoutLegacy = createUcpVersionRegistry({ ucp_version: "2026-04-08", ucp_supported_versions: ["2026-08-25"] })
 
 describe("parseUcpAgentProfile", () => {
   it("reads the profile parameter of UCP-Agent", () => {
