@@ -7,12 +7,13 @@
  */
 
 import type { PaymentHandlerRegistry } from "../payment-handler-registry"
+import type { UcpWire } from "../ucp-wire/types"
 
 /** Configuration context passed to all formatters */
 export type FormatterContext = {
   storeName: string
   storefrontUrl: string
-  ucpVersion: string
+  ucpWire: UcpWire
   acpVersion: string
   paymentHandlers: PaymentHandlerRegistry
 }

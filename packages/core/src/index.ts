@@ -77,3 +77,16 @@ export {
 
 // Status maps
 export { resolveAcpStatus, resolveUcpStatus } from "./lib/status-maps"
+
+export {
+  createUcpVersionRegistry,
+  DEFAULT_CURRENT_UCP_VERSION,
+  DEFAULT_SUPPORTED_UCP_VERSIONS,
+  KNOWN_UCP_VERSIONS,
+} from "./lib/ucp-version-registry"
+export type {
+  UcpVersionNegotiation,
+  UcpVersionRegistry,
+  UcpVersionRegistryOptions,
+} from "./lib/ucp-version-registry"
+export type { UcpWire } from "./lib/ucp-wire/types"

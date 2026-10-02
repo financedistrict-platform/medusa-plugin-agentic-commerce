@@ -133,21 +133,12 @@ function buildCheckoutMessages(ctx: FormatterContext, cart: any, status: UcpStat
 
 function ucpEnvelope(ctx: FormatterContext, includePayment: boolean, cartMetadata?: Record<string, unknown>) {
   const envelope: Record<string, unknown> = {
-    version: ctx.ucpVersion,
+    version: ctx.ucpWire.version,
     status: "success",
-    capabilities: {
-      "dev.ucp.shopping.catalog.search": [{ version: ctx.ucpVersion }],
-      "dev.ucp.shopping.catalog.lookup": [{ version: ctx.ucpVersion }],
-      "dev.ucp.shopping.checkout": [{ version: ctx.ucpVersion }],
-      "dev.ucp.shopping.cart": [{ version: ctx.ucpVersion }],
-      "dev.ucp.shopping.order": [{ version: ctx.ucpVersion }],
-      // Fulfillment Extension — extends checkout with methods/destinations/groups.
-      // Spec: https://ucp.dev/specification/fulfillment/
-      "dev.ucp.shopping.fulfillment": [{ version: ctx.ucpVersion }],
-    },
+    capabilities: ctx.ucpWire.envelopeCapabilities(),
   }
   if (includePayment) {
-    envelope.payment_handlers = ctx.paymentHandlers.getUcpCheckoutHandlers(cartMetadata)
+    envelope.payment_handlers = ctx.ucpWire.checkoutHandlers(ctx.paymentHandlers.getUcpCheckoutHandlers(cartMetadata))
   }
   return envelope
 }
@@ -156,7 +147,7 @@ function ucpEnvelope(ctx: FormatterContext, includePayment: boolean, cartMetadat
 // Line Items
 // =====================================================
 
-function formatLineItems(items: any[], currency: string) {
+function formatLineItems(ctx: FormatterContext, items: any[], currency: string) {
   return items.map((item: any) => {
     const unitAmount = toMinor(item.unit_price ?? item.raw_unit_price?.value ?? 0)
     return {
@@ -168,7 +159,7 @@ function formatLineItems(items: any[], currency: string) {
       },
       quantity: item.quantity,
       totals: [
-        { type: "line_total", display_text: "Line total", amount: unitAmount * item.quantity },
+        { type: ctx.ucpWire.lineItemTotalType, display_text: "Line total", amount: unitAmount * item.quantity },
       ],
     }
   })
@@ -264,7 +255,7 @@ export function formatUcpCheckoutSession(
     id: cart.id,
     status,
     currency,
-    line_items: formatLineItems(cart.items || [], currency),
+    line_items: formatLineItems(ctx, cart.items || [], currency),
     totals: formatTotals(cart),
     messages: buildCheckoutMessages(ctx, cart, status),
     links: [
@@ -318,7 +309,7 @@ export function formatUcpCart(ctx: FormatterContext, cart: any, baseUrl: string)
     ucp: ucpEnvelope(ctx, false),
     id: cart.id,
     currency,
-    line_items: formatLineItems(cart.items || [], currency),
+    line_items: formatLineItems(ctx, cart.items || [], currency),
     totals: formatTotals(cart),
     messages: [],
     links: [
@@ -415,7 +406,7 @@ export function formatUcpOrder(ctx: FormatterContext, order: any, baseUrl: strin
       },
       quantity: item.quantity,
       totals: [
-        { type: "line_total", display_text: "Line total", amount: unitAmount * item.quantity },
+        { type: ctx.ucpWire.lineItemTotalType, display_text: "Line total", amount: unitAmount * item.quantity },
       ],
     }
   })

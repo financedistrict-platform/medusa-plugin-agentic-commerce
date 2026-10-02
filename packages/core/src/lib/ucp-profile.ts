@@ -1,18 +1,38 @@
-import { ucpSpecBase } from "./ucp-version"
+import { ucpSpecBase } from "./ucp-wire/types"
+
+export type UcpProfileCapability = {
+  name: string
+  spec: string
+  schema: string
+  extends?: string
+}
+
+export const UCP_PROFILE_CAPABILITIES: readonly UcpProfileCapability[] = [
+  { name: "dev.ucp.shopping.catalog.search", spec: "catalog/search", schema: "catalog_search.json" },
+  { name: "dev.ucp.shopping.catalog.lookup", spec: "catalog/lookup", schema: "catalog_lookup.json" },
+  { name: "dev.ucp.shopping.checkout", spec: "checkout/", schema: "checkout.json" },
+  { name: "dev.ucp.shopping.fulfillment", spec: "fulfillment/", schema: "fulfillment.json", extends: "dev.ucp.shopping.checkout" },
+  { name: "dev.ucp.shopping.cart", spec: "cart/", schema: "cart.json" },
+  { name: "dev.ucp.shopping.order", spec: "order/", schema: "order.json" },
+]
 
 export function buildUcpProfile(
   ucpVersion: string,
   baseUrl: string,
   storeName: string,
   handlers: Record<string, unknown[]>,
+  capabilities: readonly UcpProfileCapability[] = UCP_PROFILE_CAPABILITIES,
 ) {
   const specBase = ucpSpecBase(ucpVersion)
-  const capability = (spec: string, schema: string, extra: Record<string, unknown> = {}) => [{
-    version: ucpVersion,
-    spec: `${specBase}/specification/${spec}`,
-    schema: `${specBase}/schemas/shopping/${schema}`,
-    ...extra,
-  }]
+  const capabilityBlock: Record<string, Record<string, unknown>[]> = {}
+  for (const capability of capabilities) {
+    capabilityBlock[capability.name] = [{
+      version: ucpVersion,
+      spec: `${specBase}/specification/${capability.spec}`,
+      schema: `${specBase}/schemas/shopping/${capability.schema}`,
+      ...(capability.extends ? { extends: capability.extends } : {}),
+    }]
+  }
 
   return {
     ucp: {
@@ -26,16 +46,7 @@ export function buildUcpProfile(
           endpoint: `${baseUrl}/ucp`,
         }],
       },
-      capabilities: {
-        "dev.ucp.shopping.catalog.search": capability("catalog/search", "catalog_search.json"),
-        "dev.ucp.shopping.catalog.lookup": capability("catalog/lookup", "catalog_lookup.json"),
-        "dev.ucp.shopping.checkout": capability("checkout/", "checkout.json"),
-        "dev.ucp.shopping.fulfillment": capability("fulfillment/", "fulfillment.json", {
-          extends: "dev.ucp.shopping.checkout",
-        }),
-        "dev.ucp.shopping.cart": capability("cart/", "cart.json"),
-        "dev.ucp.shopping.order": capability("order/", "order.json"),
-      },
+      capabilities: capabilityBlock,
       payment_handlers: handlers,
     },
     name: storeName,

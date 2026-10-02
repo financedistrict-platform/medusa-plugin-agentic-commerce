@@ -1,14 +1,42 @@
-export const UCP_VERSION = "2026-08-25"
+import type { UcpErrorInput, UcpWire } from "./ucp-wire/types"
+import { DEFAULT_CURRENT_UCP_VERSION, type UcpVersionRegistry } from "./ucp-version-registry"
 
-export function ucpSpecBase(version: string): string {
-  return `https://ucp.dev/${version}`
+export { ucpSpecBase } from "./ucp-wire/types"
+
+export const UCP_VERSION = DEFAULT_CURRENT_UCP_VERSION
+
+export type UcpProfileOutcome = "none" | "matched" | "undeclared" | "unknown" | "unreachable" | "disabled"
+
+export type ResolvedUcp = {
+  version: string
+  wire: UcpWire
+  outcome: UcpProfileOutcome
+  declared?: string
+  host?: string
 }
 
-export function ucpVersionFor(scope: { resolve: (name: string) => unknown }): string {
-  try {
-    const service = scope.resolve("agenticCommerce") as { getUcpVersion?: () => string }
-    return service.getUcpVersion?.() || UCP_VERSION
-  } catch {
-    return UCP_VERSION
-  }
+export type UcpRequestLike = {
+  ucp?: ResolvedUcp
+  scope: { resolve: (name: string) => unknown }
+}
+
+type UcpVersionedService = {
+  getUcpVersion(): string
+  getUcpRegistry(): UcpVersionRegistry
+}
+
+function versionedService(req: UcpRequestLike): UcpVersionedService {
+  return req.scope.resolve("agenticCommerce") as UcpVersionedService
+}
+
+export function ucpVersionFor(req: UcpRequestLike): string {
+  return req.ucp?.version ?? versionedService(req).getUcpVersion()
+}
+
+export function ucpWireFor(req: UcpRequestLike): UcpWire {
+  return req.ucp?.wire ?? versionedService(req).getUcpRegistry().currentWire()
+}
+
+export function ucpErrorFor(req: UcpRequestLike, input: UcpErrorInput): Record<string, unknown> {
+  return ucpWireFor(req).error(input)
 }

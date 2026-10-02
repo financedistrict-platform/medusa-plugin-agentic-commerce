@@ -1,0 +1,118 @@
+{
+  "ucp": {
+    "version": "2026-04-08",
+    "status": "success",
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.catalog.lookup": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.checkout": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.cart": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.order": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.fulfillment": [
+        {
+          "version": "2026-04-08"
+        }
+      ]
+    }
+  },
+  "id": "order_01",
+  "display_id": 1001,
+  "checkout_id": "cart_01",
+  "permalink_url": "https://store.test/orders/order_01",
+  "status": "pending",
+  "currency": "USD",
+  "line_items": [
+    {
+      "id": "ordli_01",
+      "item": {
+        "id": "variant_mug",
+        "title": "Ceramic Mug",
+        "price": 1250
+      },
+      "quantity": 2,
+      "totals": [
+        {
+          "type": "line_total",
+          "display_text": "Line total",
+          "amount": 2500
+        }
+      ]
+    },
+    {
+      "id": "ordli_02",
+      "item": {
+        "id": "variant_tee",
+        "title": "Logo Tee",
+        "price": 2500
+      },
+      "quantity": 1,
+      "totals": [
+        {
+          "type": "line_total",
+          "display_text": "Line total",
+          "amount": 2500
+        }
+      ]
+    }
+  ],
+  "totals": [
+    {
+      "type": "subtotal",
+      "display_text": "Subtotal",
+      "amount": 5000
+    },
+    {
+      "type": "fulfillment",
+      "display_text": "Shipping",
+      "amount": 500
+    },
+    {
+      "type": "total",
+      "display_text": "Total",
+      "amount": 5500
+    }
+  ],
+  "fulfillment_status": "not_fulfilled",
+  "fulfillment_events": [],
+  "created_at": "2026-09-30T10:20:00.000Z",
+  "updated_at": "2026-09-30T10:20:00.000Z",
+  "links": [
+    {
+      "type": "self",
+      "url": "https://store.test/ucp/orders/order_01"
+    }
+  ],
+  "buyer": {
+    "email": "ada@example.com"
+  },
+  "shipping_address": {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "street_address": "12 Analytical Row",
+    "address_locality": "London",
+    "address_region": "Greater London",
+    "address_country": "gb",
+    "postal_code": "EC1A 1BB",
+    "phone_number": "+442071234567"
+  }
+}

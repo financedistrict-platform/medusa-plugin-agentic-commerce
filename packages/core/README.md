@@ -105,7 +105,8 @@ UCP is designed for **agent-to-merchant** interactions. It uses a shopping-cart 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/.well-known/ucp` | GET | Protocol discovery and capabilities |
+| `/.well-known/ucp` | GET | Protocol discovery and capabilities, with `supported_versions` |
+| `/.well-known/ucp/:version` | GET | Discovery profile for one enabled UCP version (404 when not enabled) |
 | `/ucp/catalog/search` | POST | Full-text product search |
 | `/ucp/catalog/lookup` | POST | Direct product lookup by ID or handle |
 | `/ucp/carts` | POST | Create a new cart |
@@ -120,7 +121,20 @@ UCP is designed for **agent-to-merchant** interactions. It uses a shopping-cart 
 
 **Required headers:** `UCP-Agent`, `Request-Id`
 
-**Complete checkout:** each `payment.instruments[]` entry needs `id`, `handler_id` and `type`, and a `credential` must carry `type`. With the Prism provider, `handler_id` must be `xyz.fd.prism_payment` and both types must be `x402`. A failed payment returns `422 payment_failed`; responses under 500 are cached per `Idempotency-Key` for 24 hours, so retry with a new key.
+**Versions:** the store serves `ucp_version` (default: the latest version, currently `2026-08-25`) plus every version in `ucp_supported_versions` (default: every other known version, currently `2026-04-08`, `2026-01-23`). The version for a request comes from the `ucp.version` of the agent profile named in `UCP-Agent: ...; profile="https://..."`. The profile is fetched over HTTPS only, from public addresses only, with a 3 s timeout, a 64 KiB cap and no redirects, and cached for 10 minutes.
+
+| Agent profile | `lenient` (default) | `strict` |
+|---|---|---|
+| no `profile` in `UCP-Agent` | current version | current version |
+| unreachable or not HTTPS | current version + warning log | `424 agent_profile_unavailable` |
+| no or malformed `ucp.version` | current version + warning log | `422 version_unsupported` |
+| unknown version | current version + warning log | `422 version_unsupported` |
+| known version the store disabled | `422 version_unsupported` | `422 version_unsupported` |
+| enabled version | that version | that version |
+
+A checkout session created for a declared version stays on it. A later request that declares a different version gets `422 version_unsupported`; a request whose profile cannot be resolved keeps the session's version. `lenient` deviates from the UCP spec on purpose: agents built before version negotiation keep working. Warnings are logged as JSON with the key `ucp_profile_resolution`. In `2026-01-23`, cart and catalog routes answer `404 capabilities_incompatible`.
+
+**Complete checkout:** each `payment.instruments[]` entry carries a `credential`. With the Prism provider, `handler_id` is `xyz.fd.prism_payment`, `x402` or omitted; `type` is `x402`, `tokenized`, `default` or omitted; `credential.type` is `x402` or omitted. Any other value returns `422 invalid_instrument`, and the signed amount must still match the cart's Prism quote. A failed payment returns `422 payment_failed`; responses under 500 are cached per `Idempotency-Key` for 24 hours, so retry with a new key.
 
 ### ACP (Agent Commerce Protocol)
 
@@ -286,8 +300,12 @@ import {
 | `store_description` | `string` | `""` | Store description for discovery |
 | `payment_provider_id` | `string` | `"pp_system_default"` | Medusa payment provider ID |
 | `payment_handler_adapters` | `string[]` | `[]` | Module keys of payment handler adapters |
-| `ucp_version` | `string` | `"2026-08-25"` | UCP protocol version to advertise |
+| `ucp_version` | `string` | latest (`"2026-08-25"`) | Current UCP version, served when the agent declares none. Set `"2026-04-08"` to keep the root profile of 0.x releases |
+| `ucp_supported_versions` | `string[]` | every known version except `ucp_version` | Further UCP versions served on request; the current version is removed from this list |
+| `ucp_version_negotiation` | `"lenient" \| "strict"` | `"lenient"` | How an unusable agent profile is handled (see UCP above) |
 | `acp_version` | `string` | `"2026-01-30"` | ACP protocol version to advertise |
+
+An unknown version or negotiation value stops the store at boot.
 
 ### Environment Variables
 
@@ -334,7 +352,7 @@ import {
 
 Types and formatters are audited against the official protocol specifications:
 
-- **UCP** [`2026-08-25`](https://github.com/Universal-Commerce-Protocol/ucp) — catalog, checkout, fulfillment, payment, order, discovery
+- **UCP** [`2026-04-08`, `2026-08-25`](https://github.com/Universal-Commerce-Protocol/ucp) — catalog, cart, checkout, fulfillment, payment, order, discovery; [`2026-01-23`](https://github.com/Universal-Commerce-Protocol/ucp) — checkout, fulfillment, payment, order, discovery
 - **ACP** [`2026-01-30`](https://github.com/agentic-commerce-protocol/agentic-commerce-protocol/tree/main/spec/2026-01-30) — checkout sessions, delegate payment, capabilities
 
 ## Versioning

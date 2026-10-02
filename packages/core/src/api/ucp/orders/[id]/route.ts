@@ -1,8 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ORDER_FIELDS, FULFILLMENT_FIELDS } from "../../../../lib/order-fields"
-import { formatUcpError } from "../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
-import { ucpVersionFor } from "../../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor } from "../../../../lib/ucp-version"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -16,8 +15,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     })
 
     if (!order) {
-      res.status(404).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(404).json(ucpErrorFor(req, {
         code: "not_found",
         content: "Order not found",
       }))
@@ -38,12 +36,11 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/orders`
-    const formatted = agenticCommerceService.formatUcpOrder(order, baseUrl)
+    const formatted = agenticCommerceService.formatUcpOrder(order, baseUrl, ucpVersionFor(req))
 
     res.json(formatted)
   } catch (error: any) {
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: error.message,
     }))

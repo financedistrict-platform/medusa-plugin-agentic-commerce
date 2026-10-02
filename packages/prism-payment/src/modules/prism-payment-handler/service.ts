@@ -18,7 +18,7 @@
 import type { PaymentHandlerAdapter, CheckoutPrepareInput } from "@financedistrict/medusa-plugin-agentic-commerce"
 import {
   PrismClient,
-  isContractEntry,
+  normalizeUcpHandlers,
   type AcpHandler,
   type PaymentHandlerConfig,
   type UcpCheckoutPrepareResponse,
@@ -72,8 +72,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
 
   private client: PrismClient
 
-  /** Cached UCP discovery response (5 min TTL) */
-  private ucpDiscoveryCache: { data: UcpHandlersDiscoveryResponse; expiry: number } | null = null
+  private ucpDiscoveryCache = new Map<string, { data: UcpHandlersDiscoveryResponse; expiry: number }>()
   /** Cached ACP discovery response (5 min TTL) */
   private acpDiscoveryCache: { data: AcpHandler[]; expiry: number } | null = null
   private readonly DISCOVERY_TTL = 5 * 60 * 1000
@@ -90,8 +89,8 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   // Discovery — for .well-known/ucp and .well-known/acp.json
   // -------------------------------------------------
 
-  async getUcpDiscoveryHandlers(): Promise<UcpHandlersDiscoveryResponse> {
-    return this.fetchUcpDiscovery()
+  async getUcpDiscoveryHandlers(ucpVersion?: string): Promise<UcpHandlersDiscoveryResponse> {
+    return this.fetchUcpDiscovery(ucpVersion)
   }
 
   async getAcpDiscoveryHandlers(): Promise<AcpHandler[]> {
@@ -247,27 +246,29 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   // Internal — discovery caching
   // -------------------------------------------------
 
-  private async fetchUcpDiscovery(): Promise<UcpHandlersDiscoveryResponse> {
+  private async fetchUcpDiscovery(ucpVersion?: string): Promise<UcpHandlersDiscoveryResponse> {
     const now = Date.now()
-    if (this.ucpDiscoveryCache && now < this.ucpDiscoveryCache.expiry) {
-      return this.ucpDiscoveryCache.data
+    const key = `${this.client.getApiUrl()}|${ucpVersion ?? ""}`
+    const cached = this.ucpDiscoveryCache.get(key)
+    if (cached && now < cached.expiry) {
+      return cached.data
     }
     try {
-      const data = await this.client.fetchUcpHandlers()
-      if (!isContractEntry(data)) {
+      const data = normalizeUcpHandlers(await this.client.fetchUcpHandlers(ucpVersion))
+      if (!data) {
         console.error(`[prism-payment-handler] UCP discovery returned an invalid ${PRISM_HANDLER_ID} entry; handler omitted`)
-        return this.failUcpDiscovery(now)
+        return this.failUcpDiscovery(key, now)
       }
-      this.ucpDiscoveryCache = { data, expiry: now + this.DISCOVERY_TTL }
+      this.ucpDiscoveryCache.set(key, { data, expiry: now + this.DISCOVERY_TTL })
       return data
     } catch (error: unknown) {
       console.error(`[prism-payment-handler] UCP discovery failed: ${error}`)
-      return this.failUcpDiscovery(now)
+      return this.failUcpDiscovery(key, now)
     }
   }
 
-  private failUcpDiscovery(now: number): UcpHandlersDiscoveryResponse {
-    this.ucpDiscoveryCache = { data: {}, expiry: now + this.DISCOVERY_FAILURE_TTL }
+  private failUcpDiscovery(key: string, now: number): UcpHandlersDiscoveryResponse {
+    this.ucpDiscoveryCache.set(key, { data: {}, expiry: now + this.DISCOVERY_FAILURE_TTL })
     return {}
   }
 

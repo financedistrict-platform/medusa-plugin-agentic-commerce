@@ -50,8 +50,8 @@ describe("checkPrismInstrument", () => {
   })
 
   it.each([
-    ["an unknown handler_id", { ...instrument, handler_id: "x402" }],
-    ["instrument type tokenized", { ...instrument, type: "tokenized" }],
+    ["an unknown handler_id", { ...instrument, handler_id: "com.other.pay" }],
+    ["instrument type card", { ...instrument, type: "card" }],
     ["credential type tokenized", { ...instrument, credential: { ...credential, type: "tokenized" } }],
     ["a missing credential", { ...instrument, credential: undefined }],
   ])("rejects %s with 422 invalid_instrument", (_label, input) => {
@@ -70,7 +70,7 @@ describe("checkQuoteBinding", () => {
   })
 
   it("rejects when the quote exists but the handler_id finds no stored accepts", () => {
-    expect(checkQuoteBinding(quotedMetadata, "x402", credential))
+    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", credential))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 

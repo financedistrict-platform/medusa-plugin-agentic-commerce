@@ -2,10 +2,9 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
-import { formatUcpError } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
-import { ucpVersionFor } from "../../../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
 import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
   checkPrismInstrument,
@@ -17,11 +16,11 @@ import {
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
-  const ucpVersion = ucpVersionFor(req.scope)
+  const ucpVersion = ucpVersionFor(req)
+  const wire = ucpWireFor(req)
 
   const reject = (failure: GuardFailure) => {
-    res.status(failure.status).json(formatUcpError({
-      ucpVersion,
+    res.status(failure.status).json(ucpErrorFor(req, {
       code: failure.code,
       content: failure.content,
       severity: "unrecoverable",
@@ -44,8 +43,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   const extracted = extractUcpPayment(body)
   if (!extracted) {
-    res.status(400).json(formatUcpError({
-      ucpVersion,
+    res.status(400).json(ucpErrorFor(req, {
       code: "missing_payment",
       content: "Payment is required to complete checkout. Provide payment.instruments with a valid credential.",
     }))
@@ -126,8 +124,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     // without an order id, the payment authorized but the order wasn't created
     // — surface as an error rather than lying that status is "completed".
     if (!orderId) {
-      res.status(500).json(formatUcpError({
-        ucpVersion,
+      res.status(500).json(ucpErrorFor(req, {
         code: "order_not_created",
         content: "Checkout completion did not produce an order. Please retry or contact support.",
         severity: "unrecoverable",
@@ -153,7 +150,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       sessionData.transaction_network || sessionData.network || null
 
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/checkout-sessions`
-    const session = agenticCommerceService.formatUcpCheckoutSession(cart || {}, baseUrl)
+    const completedHandlerId = wire.completedPaymentHandlerId(handlerId)
+    const session = agenticCommerceService.formatUcpCheckoutSession(cart || {}, baseUrl, undefined, ucpVersion)
 
     res.json({
       ...session,
@@ -170,7 +168,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         ...(txReference || txStatus
           ? {
               payment: {
-                ...(handlerId ? { handler_id: handlerId } : {}),
+                ...(completedHandlerId ? { handler_id: completedHandlerId } : {}),
                 status: txStatus || "settled",
                 ...(txReference ? { transaction: txReference } : {}),
                 ...(txNetwork ? { network: txNetwork } : {}),
@@ -190,8 +188,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       // Best effort cleanup
     }
 
-    res.status(422).json(formatUcpError({
-      ucpVersion,
+    res.status(422).json(ucpErrorFor(req, {
       code: "payment_failed",
       content: "Payment could not be completed. Check the payment credential and retry.",
       severity: "unrecoverable",

@@ -5,7 +5,7 @@ import type {
   MedusaResponse,
 } from "@medusajs/framework/http"
 import { Modules } from "@medusajs/framework/utils"
-import { ucpVersionFor } from "../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../lib/ucp-version"
 
 const IDEMPOTENCY_TTL = 60 * 60 * 24 // 24 hours in seconds
 const PROCESSING_TTL = 60 // 1 minute lock while processing
@@ -23,8 +23,14 @@ function hashBody(body: unknown): string {
   return crypto.createHash("sha256").update(serialized).digest("hex")
 }
 
-function cacheKey(path: string, idempotencyKey: string, identity: string): string {
-  return `idempotency:${identity}:${path}:${idempotencyKey}`
+function cacheKey(path: string, idempotencyKey: string, identity: string, version: string | null): string {
+  const scope = version ? `${identity}:${version}` : identity
+  return `idempotency:${scope}:${path}:${idempotencyKey}`
+}
+
+function compatVersion(req: MedusaRequest, protocol: "acp" | "ucp"): string | null {
+  if (protocol !== "ucp") return null
+  return ucpVersionFor(req as unknown as UcpRequestLike)
 }
 
 function extractIdentity(req: MedusaRequest): string {
@@ -82,15 +88,11 @@ export function createIdempotencyMiddleware(options: {
             message: "Idempotency-Key header is required for POST requests",
           })
         } else {
-          res.status(400).json({
-            ucp: { version: ucpVersionFor(req.scope), status: "error" },
-            messages: [{
-              type: "error",
-              code: "idempotency_key_required",
-              content: "Idempotency-Key header is required for mutating requests",
-              severity: "unrecoverable",
-            }],
-          })
+          res.status(400).json(ucpErrorFor(req, {
+            code: "idempotency_key_required",
+            content: "Idempotency-Key header is required for mutating requests",
+            severity: "unrecoverable",
+          }))
         }
         return
       }
@@ -110,7 +112,7 @@ export function createIdempotencyMiddleware(options: {
     }
 
     const identity = extractIdentity(req)
-    const key = cacheKey(req.path, idempotencyKey, identity)
+    const key = cacheKey(req.path, idempotencyKey, identity, compatVersion(req, options.protocol))
     const bodyHash = hashBody(req.body)
 
     // Check for existing cached response
@@ -126,15 +128,11 @@ export function createIdempotencyMiddleware(options: {
             message: "Idempotency-Key has already been used with a different request body",
           })
         } else {
-          res.status(422).json({
-            ucp: { version: ucpVersionFor(req.scope), status: "error" },
-            messages: [{
-              type: "error",
-              code: "idempotency_conflict",
-              content: "Idempotency-Key has already been used with a different request body",
-              severity: "unrecoverable",
-            }],
-          })
+          res.status(422).json(ucpErrorFor(req, {
+            code: "idempotency_conflict",
+            content: "Idempotency-Key has already been used with a different request body",
+            severity: "unrecoverable",
+          }))
         }
         return
       }
@@ -148,15 +146,11 @@ export function createIdempotencyMiddleware(options: {
             message: "A request with this Idempotency-Key is currently being processed",
           })
         } else {
-          res.status(409).set("Retry-After", "1").json({
-            ucp: { version: ucpVersionFor(req.scope), status: "error" },
-            messages: [{
-              type: "error",
-              code: "idempotency_in_flight",
-              content: "A request with this Idempotency-Key is currently being processed",
-              severity: "unrecoverable",
-            }],
-          })
+          res.status(409).set("Retry-After", "1").json(ucpErrorFor(req, {
+            code: "idempotency_in_flight",
+            content: "A request with this Idempotency-Key is currently being processed",
+            severity: "unrecoverable",
+          }))
         }
         return
       }

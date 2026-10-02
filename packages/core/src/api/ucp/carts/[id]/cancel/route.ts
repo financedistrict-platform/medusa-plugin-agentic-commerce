@@ -1,7 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import cancelCheckoutSessionWorkflow from "../../../../../workflows/cancel-checkout-session"
-import { formatUcpError } from "../../../../../lib/error-formatters"
-import { ucpVersionFor } from "../../../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor } from "../../../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -12,7 +11,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     })
 
     res.json({
-      ucp: { version: ucpVersionFor(req.scope), status: "success" },
+      ucp: { version: ucpVersionFor(req), status: "success" },
       id,
       status: "canceled",
       currency: null,
@@ -27,8 +26,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       : error.message?.includes("completed") ? 409
       : 500
 
-    res.status(statusCode).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(statusCode).json(ucpErrorFor(req, {
       code: statusCode === 404 ? "not_found" : "internal_error",
       content: error.message,
     }))

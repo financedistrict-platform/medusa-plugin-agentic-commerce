@@ -1,10 +1,9 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-session"
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
-import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
-import { ucpVersionFor } from "../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor } from "../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const body = req.validatedBody as any
@@ -30,7 +29,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         currency_code: currencyCode,
         protocol: "ucp",
         agent_identifier: agentIdentifier,
-        protocol_version: ucpVersionFor(req.scope),
+        protocol_version: ucpVersionFor(req),
         session_fingerprint: computeSessionFingerprint(req),
       },
     })
@@ -45,12 +44,11 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/carts`
-    const formatted = agenticCommerceService.formatUcpCart(fullCart, baseUrl)
+    const formatted = agenticCommerceService.formatUcpCart(fullCart, baseUrl, ucpVersionFor(req))
 
     res.status(201).json(formatted)
   } catch (error: any) {
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: error.message,
     }))

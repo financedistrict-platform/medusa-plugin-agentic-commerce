@@ -1,0 +1,189 @@
+{
+  "ucp": {
+    "version": "2026-04-08",
+    "status": "success",
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.catalog.lookup": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.checkout": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.cart": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.order": [
+        {
+          "version": "2026-04-08"
+        }
+      ],
+      "dev.ucp.shopping.fulfillment": [
+        {
+          "version": "2026-04-08"
+        }
+      ]
+    },
+    "payment_handlers": {}
+  },
+  "id": "cart_01",
+  "status": "ready_for_complete",
+  "currency": "USD",
+  "line_items": [
+    {
+      "id": "cali_01",
+      "item": {
+        "id": "variant_mug",
+        "title": "Ceramic Mug",
+        "price": 1250
+      },
+      "quantity": 2,
+      "totals": [
+        {
+          "type": "line_total",
+          "display_text": "Line total",
+          "amount": 2500
+        }
+      ]
+    },
+    {
+      "id": "cali_02",
+      "item": {
+        "id": "variant_tee",
+        "title": "Logo Tee",
+        "price": 2500
+      },
+      "quantity": 1,
+      "totals": [
+        {
+          "type": "line_total",
+          "display_text": "Line total",
+          "amount": 2500
+        }
+      ]
+    }
+  ],
+  "totals": [
+    {
+      "type": "subtotal",
+      "display_text": "Subtotal",
+      "amount": 5000
+    },
+    {
+      "type": "fulfillment",
+      "display_text": "Shipping",
+      "amount": 500
+    },
+    {
+      "type": "total",
+      "display_text": "Total",
+      "amount": 5500
+    }
+  ],
+  "messages": [
+    {
+      "type": "info",
+      "code": "ready_for_complete",
+      "content": "Checkout is ready. POST /checkout-sessions/{id}/complete with payment.instruments[]."
+    }
+  ],
+  "links": [
+    {
+      "type": "terms_of_service",
+      "url": "https://store.test/terms"
+    },
+    {
+      "type": "privacy_policy",
+      "url": "https://store.test/privacy"
+    }
+  ],
+  "buyer": {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@example.com",
+    "phone_number": "+442071234567"
+  },
+  "shipping_address": {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "street_address": "12 Analytical Row",
+    "address_locality": "London",
+    "address_region": "Greater London",
+    "address_country": "gb",
+    "postal_code": "EC1A 1BB",
+    "phone_number": "+442071234567"
+  },
+  "fulfillment": {
+    "methods": [
+      {
+        "id": "shipping",
+        "type": "shipping",
+        "line_item_ids": [
+          "cali_01",
+          "cali_02"
+        ],
+        "destinations": [
+          {
+            "id": "caaddr_01",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "street_address": "12 Analytical Row",
+            "address_locality": "London",
+            "address_region": "Greater London",
+            "address_country": "gb",
+            "postal_code": "EC1A 1BB",
+            "phone_number": "+442071234567"
+          }
+        ],
+        "selected_destination_id": "caaddr_01",
+        "groups": [
+          {
+            "id": "default",
+            "line_item_ids": [
+              "cali_01",
+              "cali_02"
+            ],
+            "options": [
+              {
+                "id": "so_standard",
+                "title": "Standard",
+                "totals": [
+                  {
+                    "type": "fulfillment",
+                    "display_text": "Standard",
+                    "amount": 500
+                  }
+                ],
+                "carrier": "manual_manual"
+              },
+              {
+                "id": "so_express",
+                "title": "Express",
+                "totals": [
+                  {
+                    "type": "fulfillment",
+                    "display_text": "Express",
+                    "amount": 1500
+                  }
+                ],
+                "carrier": "manual_manual"
+              }
+            ],
+            "selected_option_id": "so_standard"
+          }
+        ]
+      }
+    ]
+  },
+  "expires_at": "2026-09-30T16:00:00.000Z"
+}

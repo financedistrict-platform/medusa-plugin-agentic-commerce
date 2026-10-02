@@ -61,14 +61,18 @@ describe("CompleteUcpCheckoutSessionSchema", () => {
     expect(parse({ payment: { instruments: [withoutCredential] } }).success).toBe(true)
   })
 
-  it.each(["id", "handler_id", "type"] as const)("rejects an instrument without %s", (field) => {
+  it.each(["id", "handler_id", "type"] as const)("accepts an original-era instrument without %s", (field) => {
     const { [field]: _omit, ...rest } = instrument
-    expect(issuePath({ payment: { instruments: [rest] } })).toBe(`payment.instruments.0.${field}`)
+    expect(parse({ payment: { instruments: [rest] } }).success).toBe(true)
   })
 
-  it("rejects a credential without type", () => {
+  it("accepts an original-era credential without type", () => {
     const { type: _omit, ...untyped } = credential
-    expect(issuePath({ payment: { instruments: [{ ...instrument, credential: untyped }] } }))
+    expect(parse({ payment: { instruments: [{ ...instrument, credential: untyped }] } }).success).toBe(true)
+  })
+
+  it("rejects a credential type that is not a string", () => {
+    expect(issuePath({ payment: { instruments: [{ ...instrument, credential: { ...credential, type: 7 } }] } }))
       .toBe("payment.instruments.0.credential.type")
   })
 

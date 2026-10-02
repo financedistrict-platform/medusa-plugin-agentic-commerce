@@ -2,12 +2,11 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-session"
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
 import { ucpAddressToMedusa } from "../../../lib/address-translator"
-import { formatUcpError } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
 import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../lib/list-shipping-options"
-import { ucpVersionFor } from "../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
@@ -40,8 +39,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       const match = await findRegionForCountry(req.scope, shippingAddress.country_code)
       if (!match) {
         const supported = await getSupportedCountries(req.scope)
-        res.status(400).json(formatUcpError({
-          ucpVersion: ucpVersionFor(req.scope),
+        res.status(400).json(ucpErrorFor(req, {
           code: "country_not_supported",
           content: `Country "${shippingAddress.country_code}" is not served by any region. Supported countries: ${supported.join(", ") || "(none configured)"}.`,
           severity: "recoverable",
@@ -63,7 +61,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         currency_code: currencyCode,
         protocol: "ucp",
         agent_identifier: agentIdentifier,
-        protocol_version: ucpVersionFor(req.scope),
+        protocol_version: ucpVersionFor(req),
+        ucp_version: (req as UcpRequestLike).ucp?.outcome === "matched" ? ucpVersionFor(req) : undefined,
         session_fingerprint: computeSessionFingerprint(req),
       } as any,
     })
@@ -99,15 +98,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const session = agenticCommerceService.formatUcpCheckoutSession(
       cartWithPayment || fullCart,
       checkoutBaseUrl,
-      shippingOptions
+      shippingOptions,
+      ucpVersionFor(req),
     )
 
     res.status(201).json(session)
   } catch (error: any) {
     const msg: string = error?.message || ""
     if (/Country with code .* is not within region/i.test(msg)) {
-      res.status(400).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(400).json(ucpErrorFor(req, {
         code: "country_not_supported",
         content: msg,
         severity: "recoverable",
@@ -115,8 +114,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       }))
       return
     }
-    res.status(500).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(500).json(ucpErrorFor(req, {
       code: "internal_error",
       content: msg || "Internal error",
     }))

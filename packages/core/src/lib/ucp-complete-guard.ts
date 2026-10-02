@@ -6,6 +6,9 @@ import {
 
 export const PRISM_UCP_HANDLER_ID = "xyz.fd.prism_payment"
 export const PRISM_INSTRUMENT_TYPE = "x402"
+export const PRISM_UCP_HANDLER_IDS: readonly string[] = [PRISM_UCP_HANDLER_ID, PRISM_INSTRUMENT_TYPE]
+
+const PRISM_INSTRUMENT_TYPES: readonly unknown[] = [PRISM_INSTRUMENT_TYPE, "tokenized", "default", undefined]
 
 const PRISM_PROVIDER_PREFIX = "pp_prism_"
 
@@ -30,18 +33,21 @@ export function formatZodIssuePath(issues: { path: PropertyKey[] }[]): string {
   return path.length > 0 ? path.map(String).join(".") : "body"
 }
 
-export function checkPrismInstrument(instrument: InstrumentInput): GuardFailure | null {
-  const credentialType = typeof instrument.credential === "object" && instrument.credential !== null
-    ? (instrument.credential as Record<string, unknown>).type
-    : undefined
+export function normalizePrismHandlerId(handlerId: string | undefined): string | undefined {
+  return handlerId === undefined || PRISM_UCP_HANDLER_IDS.includes(handlerId) ? PRISM_UCP_HANDLER_ID : handlerId
+}
 
-  if (instrument.handler_id !== PRISM_UCP_HANDLER_ID) {
+export function checkPrismInstrument(instrument: InstrumentInput): GuardFailure | null {
+  const hasCredential = typeof instrument.credential === "object" && instrument.credential !== null
+  const credentialType = hasCredential ? (instrument.credential as Record<string, unknown>).type : undefined
+
+  if (instrument.handler_id !== undefined && !PRISM_UCP_HANDLER_IDS.includes(instrument.handler_id as string)) {
     return invalidInstrument(`handler_id must be ${PRISM_UCP_HANDLER_ID}`)
   }
-  if (instrument.type !== PRISM_INSTRUMENT_TYPE) {
+  if (!PRISM_INSTRUMENT_TYPES.includes(instrument.type)) {
     return invalidInstrument(`type must be ${PRISM_INSTRUMENT_TYPE}`)
   }
-  if (credentialType !== PRISM_INSTRUMENT_TYPE) {
+  if (!hasCredential || (credentialType !== undefined && credentialType !== PRISM_INSTRUMENT_TYPE)) {
     return invalidInstrument(`credential.type must be ${PRISM_INSTRUMENT_TYPE}`)
   }
   return null
@@ -65,7 +71,7 @@ export function checkQuoteBinding(
 
   const validation = validateSignedAgainstStored(
     signedSummary,
-    readStoredPrismAccepts(cartMetadata, handlerId, "ucp"),
+    readStoredPrismAccepts(cartMetadata, normalizePrismHandlerId(handlerId), "ucp"),
   )
   return validation.ok
     ? null

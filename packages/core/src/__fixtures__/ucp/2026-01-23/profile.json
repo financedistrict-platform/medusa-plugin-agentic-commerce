@@ -1,0 +1,56 @@
+{
+  "ucp": {
+    "version": "2026-01-23",
+    "services": {
+      "dev.ucp.shopping": [
+        {
+          "version": "2026-01-23",
+          "spec": "https://ucp.dev/2026-01-23/specification/overview",
+          "schema": "https://ucp.dev/2026-01-23/services/shopping/rest.openapi.json",
+          "transport": "rest",
+          "endpoint": "https://store.test/ucp"
+        }
+      ]
+    },
+    "capabilities": {
+      "dev.ucp.shopping.checkout": [
+        {
+          "version": "2026-01-23",
+          "spec": "https://ucp.dev/2026-01-23/specification/checkout/",
+          "schema": "https://ucp.dev/2026-01-23/schemas/shopping/checkout.json"
+        }
+      ],
+      "dev.ucp.shopping.fulfillment": [
+        {
+          "version": "2026-01-23",
+          "spec": "https://ucp.dev/2026-01-23/specification/fulfillment/",
+          "schema": "https://ucp.dev/2026-01-23/schemas/shopping/fulfillment.json",
+          "extends": "dev.ucp.shopping.checkout"
+        }
+      ],
+      "dev.ucp.shopping.order": [
+        {
+          "version": "2026-01-23",
+          "spec": "https://ucp.dev/2026-01-23/specification/order/",
+          "schema": "https://ucp.dev/2026-01-23/schemas/shopping/order.json"
+        }
+      ]
+    },
+    "payment_handlers": {
+      "xyz.fd.prism_payment": [
+        {
+          "id": "xyz.fd.prism_payment",
+          "version": "2026-10-07",
+          "spec": "https://gw.example/ucp/2026-01-23/prism.md",
+          "schema": "https://gw.example/ucp/2026-01-23/schema.json",
+          "config": {},
+          "config_schema": "https://gw.example/ucp/2026-01-23/schema.json",
+          "instrument_schemas": [
+            "https://gw.example/ucp/2026-01-23/instrument_schema.json"
+          ]
+        }
+      ]
+    }
+  },
+  "name": "Demo Store"
+}

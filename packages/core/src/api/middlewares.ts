@@ -13,11 +13,18 @@ import {
 } from "./validation-schemas"
 import { createIdempotencyMiddleware } from "./middleware/idempotency"
 import { formatAcpError } from "../lib/error-formatters"
-import { formatUcpError } from "../lib/error-formatters"
 import { computeSessionFingerprint, verifySessionOwnership } from "../lib/session-ownership"
-import { ucpVersionFor } from "../lib/ucp-version"
-import { buildUcpProfile } from "../lib/ucp-profile"
-import { getPublicBaseUrl } from "../lib/public-url"
+import { ucpErrorFor, type UcpRequestLike } from "../lib/ucp-version"
+import type { UcpCapability } from "../lib/ucp-wire/types"
+import type { UcpVersionRegistry } from "../lib/ucp-version-registry"
+import {
+  applyUcpSessionPin,
+  isFallbackOutcome,
+  resolveUcpVersion,
+  type UcpResolution,
+} from "../lib/ucp-version-resolver"
+import { createAgentProfileFetcher } from "../lib/agent-profile-fetcher"
+import { sendUcpProfile, sendUcpVersionProfile } from "../lib/ucp-discovery"
 
 // Supported ACP API versions
 const SUPPORTED_ACP_VERSIONS = ["2026-01-30"]
@@ -114,8 +121,7 @@ async function validateUcpRequest(
   const ucpAgent = req.headers["ucp-agent"] as string | undefined
 
   if (!ucpAgent) {
-    res.status(400).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(400).json(ucpErrorFor(req, {
       code: "missing_ucp_agent",
       content: "Missing UCP-Agent header for platform identification",
     }))
@@ -125,8 +131,7 @@ async function validateUcpRequest(
   // Validate Request-Id header (required by UCP spec)
   const requestId = req.headers["request-id"] as string | undefined
   if (!requestId) {
-    res.status(400).json(formatUcpError({
-      ucpVersion: ucpVersionFor(req.scope),
+    res.status(400).json(ucpErrorFor(req, {
       code: "missing_request_id",
       content: "Request-Id header is required for UCP requests",
     }))
@@ -142,8 +147,7 @@ async function validateUcpRequest(
     const token = authHeader.replace("Bearer ", "").trim()
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     if (!agenticCommerceService.validateApiKey(token)) {
-      res.status(401).json(formatUcpError({
-        ucpVersion: ucpVersionFor(req.scope),
+      res.status(401).json(ucpErrorFor(req, {
         code: "unauthorized",
         content: "Invalid Bearer token",
       }))
@@ -151,6 +155,89 @@ async function validateUcpRequest(
     }
   }
 
+  next()
+}
+
+const agentProfileFetcher = createAgentProfileFetcher()
+
+const CAPABILITY_PATHS: [string, UcpCapability][] = [
+  ["/ucp/carts", "cart"],
+  ["/ucp/catalog", "catalog"],
+  ["/ucp/checkout-sessions", "checkout"],
+  ["/ucp/orders", "order"],
+]
+
+function ucpRegistry(req: MedusaRequest): UcpVersionRegistry {
+  return (req.scope.resolve("agenticCommerce") as { getUcpRegistry(): UcpVersionRegistry }).getUcpRegistry()
+}
+
+function logUcpResolution(req: MedusaRequest, resolution: UcpResolution) {
+  if (!resolution.rejection && !isFallbackOutcome(resolution.outcome)) return
+  const logger = req.scope.resolve("logger") as { warn(message: string): void }
+  logger.warn(JSON.stringify({
+    ucp_profile_resolution: resolution.outcome,
+    served: resolution.rejection ? null : resolution.version,
+    host: resolution.host ?? null,
+  }))
+}
+
+function rejectUcpResolution(req: MedusaRequest, res: MedusaResponse, resolution: UcpResolution): boolean {
+  if (!resolution.rejection) return false
+  res.status(resolution.rejection.status).json(resolution.wire.error({
+    code: resolution.rejection.code,
+    content: resolution.rejection.content,
+  }))
+  return true
+}
+
+async function resolveUcpVersionMiddleware(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction
+) {
+  const resolution = await resolveUcpVersion(
+    ucpRegistry(req),
+    req.headers["ucp-agent"] as string | undefined,
+    agentProfileFetcher,
+  )
+  logUcpResolution(req, resolution)
+  if (rejectUcpResolution(req, res, resolution)) return
+
+  ;(req as UcpRequestLike).ucp = resolution
+  const capability = CAPABILITY_PATHS.find(([prefix]) => req.path.startsWith(prefix))?.[1]
+  if (capability && !resolution.wire.supports(capability)) {
+    res.status(404).json(resolution.wire.error({
+      code: "capabilities_incompatible",
+      content: `Capability ${capability} is not available in UCP version ${resolution.version}.`,
+    }))
+    return
+  }
+  next()
+}
+
+async function enforceSessionVersionPin(
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction
+) {
+  const resolution = (req as UcpRequestLike).ucp as UcpResolution | undefined
+  const { id } = req.params
+  if (!resolution || !id) {
+    next()
+    return
+  }
+
+  const query = req.scope.resolve("query") as any
+  const { data: [cart] } = await query.graph({
+    entity: "cart",
+    fields: ["id", "metadata"],
+    filters: { id },
+  })
+  const pinned = applyUcpSessionPin(ucpRegistry(req), resolution, cart?.metadata?.ucp_version)
+  if (pinned.version !== resolution.version || pinned.rejection) logUcpResolution(req, pinned)
+  if (rejectUcpResolution(req, res, pinned)) return
+
+  ;(req as UcpRequestLike).ucp = pinned
   next()
 }
 
@@ -195,8 +282,7 @@ async function verifySessionOwner(
           httpStatus: 403,
         }))
       } else {
-        res.status(403).json(formatUcpError({
-          ucpVersion: ucpVersionFor(req.scope),
+        res.status(403).json(ucpErrorFor(req, {
           code: "session_ownership_mismatch",
           content: "You do not have permission to modify this checkout session",
         }))
@@ -237,15 +323,11 @@ async function resolvePaymentAdapters(
 // /.well-known/ paths that proxy to the real handlers.
 
 async function wellKnownUcpHandler(req: MedusaRequest, res: MedusaResponse) {
-  const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
-  const handlers = await agenticCommerceService.getPaymentHandlerService().getUcpDiscoveryHandlers()
+  await sendUcpProfile(req, res)
+}
 
-  res.json(buildUcpProfile(
-    agenticCommerceService.getUcpVersion(),
-    getPublicBaseUrl(req),
-    agenticCommerceService.getStoreName(),
-    handlers,
-  ))
+async function wellKnownUcpVersionHandler(req: MedusaRequest, res: MedusaResponse) {
+  await sendUcpVersionProfile(req, res)
 }
 
 async function wellKnownAcpHandler(req: MedusaRequest, res: MedusaResponse) {
@@ -281,6 +363,11 @@ export default defineMiddlewares({
       matcher: "/.well-known/ucp",
       method: "GET",
       middlewares: [resolvePaymentAdapters, wellKnownUcpHandler],
+    },
+    {
+      matcher: "/.well-known/ucp/:version",
+      method: "GET",
+      middlewares: [resolvePaymentAdapters, wellKnownUcpVersionHandler],
     },
     {
       matcher: "/.well-known/acp.json",
@@ -343,33 +430,33 @@ export default defineMiddlewares({
     // --- UCP Auth + Adapter Resolution ---
     {
       matcher: "/ucp/catalog/*",
-      middlewares: [validateUcpRequest, resolvePaymentAdapters],
+      middlewares: [validateUcpRequest, resolveUcpVersionMiddleware, resolvePaymentAdapters],
     },
     {
       matcher: "/ucp/checkout-sessions*",
-      middlewares: [validateUcpRequest, resolvePaymentAdapters],
+      middlewares: [validateUcpRequest, resolveUcpVersionMiddleware, resolvePaymentAdapters],
     },
     {
       matcher: "/ucp/carts*",
-      middlewares: [validateUcpRequest, resolvePaymentAdapters],
+      middlewares: [validateUcpRequest, resolveUcpVersionMiddleware, resolvePaymentAdapters],
     },
     {
       matcher: "/ucp/orders*",
-      middlewares: [validateUcpRequest, resolvePaymentAdapters],
+      middlewares: [validateUcpRequest, resolveUcpVersionMiddleware, resolvePaymentAdapters],
     },
 
     // --- UCP Session Ownership ---
     {
       matcher: "/ucp/checkout-sessions/:id",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/checkout-sessions/:id/complete",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/checkout-sessions/:id/cancel",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/carts/:id",

@@ -1,0 +1,14 @@
+{
+  "ucp": {
+    "version": "2026-08-25",
+    "status": "error"
+  },
+  "messages": [
+    {
+      "type": "error",
+      "code": "not_found",
+      "content": "Checkout session not found",
+      "severity": "unrecoverable"
+    }
+  ]
+}
