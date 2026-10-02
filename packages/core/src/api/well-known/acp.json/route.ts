@@ -23,7 +23,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     // Fall back to default
   }
 
-  const handlers = await paymentHandlers.getAcpDiscoveryHandlers()
+  const handlers = await paymentHandlers.getAcpDiscoveryHandlers(agenticCommerceService.getUcpVersion())
 
   res.json({
     protocol: {

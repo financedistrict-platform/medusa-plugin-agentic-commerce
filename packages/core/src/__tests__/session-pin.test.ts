@@ -52,10 +52,10 @@ describe("applyUcpSessionPin", () => {
   it("rejects a matched profile whose version differs from the pinned one", () => {
     const pinned = applyUcpSessionPin(registry, resolution("matched", "2026-04-08", "2026-04-08"), "2026-08-25")
     expect(pinned.rejection).toMatchObject({ status: 422, code: "version_unsupported" })
-    expect(pinned.rejection!.content).toBe("Version 2026-04-08 is not supported. This business implements versions 2026-04-08, 2026-08-25, 2026-01-23.")
+    expect(pinned.rejection!.content).toBe("This session is bound to UCP version 2026-08-25; the agent profile now declares 2026-04-08.")
   })
 
-  it.each(["unreachable", "undeclared", "unknown", "none"] as const)("serves the pinned version on a %s outcome", (outcome) => {
+  it.each(["unreachable", "undeclared", "none"] as const)("serves the pinned version on a %s outcome", (outcome) => {
     const pinned = applyUcpSessionPin(registry, resolution(outcome, "2026-04-08"), "2026-08-25")
     expect(pinned.rejection).toBeUndefined()
     expect(pinned.version).toBe("2026-08-25")

@@ -25,7 +25,7 @@ beforeAll(async () => {
       return
     }
     if (req.url === "/big") {
-      res.end(JSON.stringify({ ucp: { version: "2026-08-25" }, pad: "x".repeat(70_000) }))
+      res.end(JSON.stringify({ ucp: { version: "2026-08-25" }, pad: "x".repeat(140_000) }))
       return
     }
     if (req.url === "/redirect") {

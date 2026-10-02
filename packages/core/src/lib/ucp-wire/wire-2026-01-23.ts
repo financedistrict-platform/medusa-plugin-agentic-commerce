@@ -25,7 +25,7 @@ export const wire20260123: UcpWire = {
   lineItemTotalType: "subtotal",
 
   profile(input: UcpProfileInput) {
-    return buildUcpProfile(VERSION, input.publicBaseUrl, input.storeName, withoutLaterFields(input.handlers), PROFILE_CAPABILITIES)
+    return buildUcpProfile(VERSION, input.publicBaseUrl, input.storeName, withoutLaterFields(input.handlers), PROFILE_CAPABILITIES, "openapi.json")
   },
 
   envelopeCapabilities() {

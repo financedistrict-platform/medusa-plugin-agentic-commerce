@@ -334,7 +334,7 @@ async function wellKnownAcpHandler(req: MedusaRequest, res: MedusaResponse) {
   const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
   const paymentHandlers = agenticCommerceService.getPaymentHandlerService()
   const acpVersion = agenticCommerceService.getAcpVersion()
-  const handlers = await paymentHandlers.getAcpDiscoveryHandlers()
+  const handlers = await paymentHandlers.getAcpDiscoveryHandlers(agenticCommerceService.getUcpVersion())
   const baseUrl = `${req.protocol}://${req.get("host")}`
 
   res.json({
@@ -460,11 +460,11 @@ export default defineMiddlewares({
     },
     {
       matcher: "/ucp/carts/:id",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/carts/:id/cancel",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
 
     // --- UCP Idempotency (required on POST/PUT) ---

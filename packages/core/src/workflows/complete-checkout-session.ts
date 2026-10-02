@@ -16,6 +16,7 @@ import { setupPaymentStep } from "./steps/setup-payment"
 type CompleteCheckoutSessionInput = {
   cart_id: string
   payment_provider_id: string
+  ucp_version: string
   payment_data?: {
     /** Base64-encoded x402 PaymentAuthorizationResult */
     eip3009_authorization?: string
@@ -50,6 +51,7 @@ const completeCheckoutSessionWorkflow = createWorkflow(
       return {
         cart_id: input.cart_id,
         payment_provider_id: input.payment_provider_id,
+        ucp_version: input.ucp_version,
         payment_data: hasPaymentData
           ? {
               eip3009_authorization: authorization || legacyToken,

@@ -6,7 +6,7 @@ import { unsupportedVersionMessage } from "./ucp-version-resolver"
 type DiscoveryService = {
   getUcpRegistry(): UcpVersionRegistry
   getStoreName(): string
-  getPaymentHandlerService(): { getUcpDiscoveryHandlers(ucpVersion?: string): Promise<Record<string, unknown[]>> }
+  getPaymentHandlerService(): { getUcpDiscoveryHandlers(ucpVersion: string): Promise<Record<string, unknown[]>> }
 }
 
 async function renderProfile(req: MedusaRequest, version: string, includeSupported: boolean) {

@@ -73,8 +73,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   private client: PrismClient
 
   private ucpDiscoveryCache = new Map<string, { data: UcpHandlersDiscoveryResponse; expiry: number }>()
-  /** Cached ACP discovery response (5 min TTL) */
-  private acpDiscoveryCache: { data: AcpHandler[]; expiry: number } | null = null
+  private acpDiscoveryCache = new Map<string, { data: AcpHandler[]; expiry: number }>()
   private readonly DISCOVERY_TTL = 5 * 60 * 1000
   private readonly DISCOVERY_FAILURE_TTL = 60 * 1000
 
@@ -89,12 +88,12 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   // Discovery — for .well-known/ucp and .well-known/acp.json
   // -------------------------------------------------
 
-  async getUcpDiscoveryHandlers(ucpVersion?: string): Promise<UcpHandlersDiscoveryResponse> {
+  async getUcpDiscoveryHandlers(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
     return this.fetchUcpDiscovery(ucpVersion)
   }
 
-  async getAcpDiscoveryHandlers(): Promise<AcpHandler[]> {
-    return this.fetchAcpDiscovery()
+  async getAcpDiscoveryHandlers(ucpVersion: string): Promise<AcpHandler[]> {
+    return this.fetchAcpDiscovery(ucpVersion)
   }
 
   // -------------------------------------------------
@@ -102,7 +101,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   // -------------------------------------------------
 
   async prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<PrismCheckoutData | null> {
-    const { cart, checkoutBaseUrl, storeName, container } = input
+    const { cart, checkoutBaseUrl, storeName, ucpVersion, container } = input
 
     // Medusa v2 stores cart.total in MAJOR units as a BigNumber (e.g., 17 for
     // €17.00, not 1700). Prism's `amount` field expects a decimal string in
@@ -147,8 +146,8 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     // Call UCP and ACP prepare in parallel — fail-soft per protocol so
     // a transient error on one side doesn't kill the other.
     const [ucpResult, acpResult] = await Promise.allSettled([
-      this.client.prepareUcpPayment(prepareInput),
-      this.client.prepareAcpPayment(prepareInput),
+      this.client.prepareUcpPayment(prepareInput, ucpVersion),
+      this.client.prepareAcpPayment(prepareInput, ucpVersion),
     ])
 
     const ucp = ucpResult.status === "fulfilled" ? ucpResult.value : null
@@ -246,9 +245,9 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   // Internal — discovery caching
   // -------------------------------------------------
 
-  private async fetchUcpDiscovery(ucpVersion?: string): Promise<UcpHandlersDiscoveryResponse> {
+  private async fetchUcpDiscovery(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
     const now = Date.now()
-    const key = `${this.client.getApiUrl()}|${ucpVersion ?? ""}`
+    const key = `${this.client.getApiUrl()}|${ucpVersion}`
     const cached = this.ucpDiscoveryCache.get(key)
     if (cached && now < cached.expiry) {
       return cached.data
@@ -272,18 +271,20 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     return {}
   }
 
-  private async fetchAcpDiscovery(): Promise<AcpHandler[]> {
+  private async fetchAcpDiscovery(ucpVersion: string): Promise<AcpHandler[]> {
     const now = Date.now()
-    if (this.acpDiscoveryCache && now < this.acpDiscoveryCache.expiry) {
-      return this.acpDiscoveryCache.data
+    const key = `${this.client.getApiUrl()}|${ucpVersion}`
+    const cached = this.acpDiscoveryCache.get(key)
+    if (cached && now < cached.expiry) {
+      return cached.data
     }
     try {
-      const data = await this.client.fetchAcpHandlers()
-      this.acpDiscoveryCache = { data, expiry: now + this.DISCOVERY_TTL }
+      const data = await this.client.fetchAcpHandlers(ucpVersion)
+      this.acpDiscoveryCache.set(key, { data, expiry: now + this.DISCOVERY_TTL })
       return data
     } catch (error: unknown) {
       console.error(`[prism-payment-handler] ACP discovery failed: ${error}`)
-      return this.acpDiscoveryCache?.data ?? []
+      return cached?.data ?? []
     }
   }
 }

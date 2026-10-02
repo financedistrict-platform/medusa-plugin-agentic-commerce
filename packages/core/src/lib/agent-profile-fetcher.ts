@@ -7,7 +7,7 @@ import { readPackageVersion } from "./package-version"
 export const AGENT_PROFILE_CACHE_TTL_MS = 600_000
 export const AGENT_PROFILE_CACHE_MAX_ENTRIES = 1000
 export const AGENT_PROFILE_MAX_IN_FLIGHT = 16
-export const AGENT_PROFILE_MAX_BYTES = 65_536
+export const AGENT_PROFILE_MAX_BYTES = 131_072
 export const AGENT_PROFILE_TIMEOUT_MS = 3_000
 
 const VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/

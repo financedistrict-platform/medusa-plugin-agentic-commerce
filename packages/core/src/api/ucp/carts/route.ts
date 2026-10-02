@@ -3,7 +3,7 @@ import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-se
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
-import { ucpErrorFor, ucpVersionFor } from "../../../lib/ucp-version"
+import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const body = req.validatedBody as any
@@ -30,6 +30,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         protocol: "ucp",
         agent_identifier: agentIdentifier,
         protocol_version: ucpVersionFor(req),
+        ucp_version: (req as UcpRequestLike).ucp?.outcome === "matched" ? ucpVersionFor(req) : undefined,
         session_fingerprint: computeSessionFingerprint(req),
       },
     })

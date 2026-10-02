@@ -12,7 +12,7 @@ export type UcpResolution = ResolvedUcp & {
   rejection?: UcpResolutionRejection
 }
 
-const FALLBACK_OUTCOMES: readonly UcpProfileOutcome[] = ["undeclared", "unknown", "unreachable"]
+const FALLBACK_OUTCOMES: readonly UcpProfileOutcome[] = ["undeclared", "unreachable"]
 
 export function isFallbackOutcome(outcome: UcpProfileOutcome): boolean {
   return FALLBACK_OUTCOMES.includes(outcome)
@@ -71,7 +71,7 @@ export async function resolveUcpVersion(
 
   if (outcome === "matched") return served(registry, declared!, outcome, declared, host)
 
-  if (outcome === "disabled") {
+  if (outcome === "disabled" || outcome === "unknown") {
     return rejected(registry, outcome, {
       status: 422,
       code: "version_unsupported",
@@ -81,8 +81,8 @@ export async function resolveUcpVersion(
 
   if (registry.negotiation === "strict") {
     return rejected(registry, outcome, outcome === "unreachable"
-      ? { status: 424, code: "agent_profile_unavailable", content: "Agent profile could not be retrieved." }
-      : { status: 422, code: "version_unsupported", content: unsupportedVersionMessage(registry, declared ?? "undeclared") },
+      ? { status: 424, code: "profile_unreachable", content: "Agent profile could not be retrieved." }
+      : { status: 422, code: "profile_malformed", content: "Agent profile does not declare a UCP version." },
     declared, host)
   }
 
@@ -102,7 +102,7 @@ export function applyUcpSessionPin(
     return rejected(registry, resolution.outcome, {
       status: 422,
       code: "version_unsupported",
-      content: unsupportedVersionMessage(registry, resolution.declared!),
+      content: `This session is bound to UCP version ${pinned}; the agent profile now declares ${resolution.declared}.`,
     }, resolution.declared, resolution.host)
   }
 

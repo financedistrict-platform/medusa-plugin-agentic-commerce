@@ -22,6 +22,7 @@ export function buildUcpProfile(
   storeName: string,
   handlers: Record<string, unknown[]>,
   capabilities: readonly UcpProfileCapability[] = UCP_PROFILE_CAPABILITIES,
+  serviceSchemaFile = "rest.openapi.json",
 ) {
   const specBase = ucpSpecBase(ucpVersion)
   const capabilityBlock: Record<string, Record<string, unknown>[]> = {}
@@ -41,7 +42,7 @@ export function buildUcpProfile(
         "dev.ucp.shopping": [{
           version: ucpVersion,
           spec: `${specBase}/specification/overview`,
-          schema: `${specBase}/services/shopping/rest.openapi.json`,
+          schema: `${specBase}/services/shopping/${serviceSchemaFile}`,
           transport: "rest",
           endpoint: `${baseUrl}/ucp`,
         }],
