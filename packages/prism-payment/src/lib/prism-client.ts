@@ -249,10 +249,6 @@ export class PrismClient {
     )
   }
 
-  // -------------------------------------------------
-  // Payment verification and settlement
-  // -------------------------------------------------
-
   async verifyPayment(request: PrismPaymentRequest, ucpVersion: string): Promise<Record<string, unknown>> {
     return this.post<Record<string, unknown>>(`/api/v${request.x402Version}/payment/verify`, request, ucpVersion)
   }
