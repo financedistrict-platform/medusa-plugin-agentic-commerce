@@ -58,7 +58,7 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
 
   it("settles an x402 instrument", async () => {
     const result = await provider.authorizePayment({
-      data: { eip3009_authorization: encode(credential), instrument_type: "x402" },
+      data: { eip3009_authorization: encode(credential), instrument_type: "x402", ucp_version: "2026-01-23" },
     } as any)
     expect(result.status).toBe("authorized")
     expect(settle).toHaveBeenCalledTimes(1)
@@ -69,7 +69,7 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
     ["credential type tokenized", "x402", { ...credential, type: "tokenized" }],
   ])("rejects %s before settling", async (_label, instrumentType, cred) => {
     const result = await provider.authorizePayment({
-      data: { eip3009_authorization: encode(cred), instrument_type: instrumentType },
+      data: { eip3009_authorization: encode(cred), instrument_type: instrumentType, ucp_version: "2026-01-23" },
     } as any)
     expect(result.status).toBe("error")
     expect((result.data as Record<string, unknown>).error).toBe("invalid_instrument_type")
