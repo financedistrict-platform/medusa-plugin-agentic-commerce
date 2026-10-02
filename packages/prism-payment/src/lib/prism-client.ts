@@ -162,6 +162,12 @@ function userAgent(ucpVersion: string): string {
   return `fd-medusa-prism/${ucpVersion}`
 }
 
+export type PrismPaymentRequest = {
+  x402Version: number
+  paymentPayload: unknown
+  paymentRequirements: unknown
+}
+
 export type PrismClientOptions = {
   apiUrl?: string
   apiKey?: string
@@ -241,6 +247,18 @@ export class PrismClient {
       this.preparePayload(input),
       ucpVersion,
     )
+  }
+
+  // -------------------------------------------------
+  // Payment verification and settlement
+  // -------------------------------------------------
+
+  async verifyPayment(request: PrismPaymentRequest, ucpVersion: string): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(`/api/v${request.x402Version}/payment/verify`, request, ucpVersion)
+  }
+
+  async settlePayment(request: PrismPaymentRequest, ucpVersion: string): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(`/api/v${request.x402Version}/payment/settle`, request, ucpVersion)
   }
 
   // -------------------------------------------------

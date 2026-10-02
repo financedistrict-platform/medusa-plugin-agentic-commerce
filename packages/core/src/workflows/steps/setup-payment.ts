@@ -8,6 +8,7 @@ import {
 type SetupPaymentInput = {
   cart_id: string
   payment_provider_id: string
+  ucp_version: string
   payment_data?: {
     /** Base64-encoded x402 PaymentAuthorizationResult */
     eip3009_authorization?: string
@@ -70,7 +71,7 @@ export const setupPaymentStep = createStep(
 
     if (!hasActiveSession) {
       // Create payment session with the configured provider
-      const sessionData: Record<string, unknown> = {}
+      const sessionData: Record<string, unknown> = { ucp_version: input.ucp_version }
 
       // Pass EIP-3009 authorization to the payment provider
       // The provider receives this in its initiatePayment() and stores it in session data,

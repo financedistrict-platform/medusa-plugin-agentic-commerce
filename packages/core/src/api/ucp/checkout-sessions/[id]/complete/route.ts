@@ -78,6 +78,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       input: {
         cart_id: id,
         payment_provider_id: paymentProviderId,
+        ucp_version: ucpVersion,
         payment_data: {
           eip3009_authorization: eip3009Authorization,
           x402_version: x402Version,

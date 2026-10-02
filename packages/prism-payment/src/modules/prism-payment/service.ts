@@ -28,6 +28,7 @@ import type {
   PrismVerifyResponse,
 } from "./types"
 import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
+import { PrismClient } from "../../lib/prism-client"
 
 /**
  * Prism Payment Provider for Medusa v2
@@ -46,8 +47,7 @@ import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
 class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentConfig> {
   static identifier = "prism"
 
-  private apiUrl: string
-  private apiKey: string
+  private client: PrismClient
   private supportedChains: string[]
   private supportedAssets: string[]
   private autoCapture: boolean
@@ -56,8 +56,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   constructor(cradle: Record<string, unknown>, config: PrismPaymentConfig) {
     super(cradle, config)
 
-    this.apiUrl = config.api_url
-    this.apiKey = config.api_key
+    this.client = new PrismClient({ apiUrl: config.api_url, apiKey: config.api_key })
     this.supportedChains = config.supported_chains || ["base"]
     this.supportedAssets = config.supported_assets || ["usdc"]
     this.autoCapture = config.auto_capture !== false
@@ -100,6 +99,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     }
     if (inputData.instrument_type) {
       data.instrument_type = inputData.instrument_type
+    }
+    if (inputData.ucp_version) {
+      data.ucp_version = inputData.ucp_version
     }
 
     return { id: sessionId, data }
@@ -173,7 +175,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     // Optionally verify with Prism before authorizing
     if (this.verifyBeforeSettle) {
       try {
-        const verifyResult = await this.verifyWithPrism(authorization)
+        const verifyResult = await this.verifyWithPrism(authorization, data.ucp_version as string)
         if (!verifyResult.isValid) {
           return {
             data: { ...data, error: `prism_verification_failed: ${verifyResult.error ?? "unknown"}` },
@@ -190,7 +192,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     // If auto_capture, settle immediately during authorization
     if (this.autoCapture) {
       try {
-        const settleResult = await this.settleWithPrism(authorization)
+        const settleResult = await this.settleWithPrism(authorization, data.ucp_version as string)
         if (!settleResult.success) {
           const reason = settleResult.errorReason ?? "unknown"
           return {
@@ -274,7 +276,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         Buffer.from(authorizationB64, "base64").toString("utf-8")
       ) as X402PaymentAuthorization
 
-      const settleResult = await this.settleWithPrism(authorization)
+      const settleResult = await this.settleWithPrism(authorization, data.ucp_version as string)
       if (!settleResult.success) {
         throw new Error(
           `Settlement failed: ${settleResult.errorReason ?? "unknown"}`
@@ -384,6 +386,14 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   // Prism API Client Methods
   // =====================================================
 
+  private paymentRequest(authorization: X402PaymentAuthorization) {
+    return {
+      x402Version: authorization.x402Version || 2,
+      paymentPayload: authorization.paymentPayload,
+      paymentRequirements: authorization.paymentRequirements,
+    }
+  }
+
   /**
    * Verify an EIP-3009 authorization with Prism before settlement.
    *
@@ -394,28 +404,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
    * is explicitly `true`.
    */
   private async verifyWithPrism(
-    authorization: X402PaymentAuthorization
+    authorization: X402PaymentAuthorization,
+    ucpVersion: string
   ): Promise<PrismVerifyResponse> {
-    const version = authorization.x402Version || 2
-    const response = await fetch(`${this.apiUrl}/api/v${version}/payment/verify`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": this.apiKey,
-      },
-      body: JSON.stringify({
-        x402Version: version,
-        paymentPayload: authorization.paymentPayload,
-        paymentRequirements: authorization.paymentRequirements,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error")
-      throw new Error(`Prism verify returned ${response.status}: ${errorText}`)
-    }
-
-    const raw = (await response.json()) as Record<string, unknown>
+    const raw = await this.client.verifyPayment(this.paymentRequest(authorization), ucpVersion)
     return {
       // Fail closed: only accept explicit truthy in either canonical or legacy field.
       isValid: raw.isValid === true || raw.valid === true,
@@ -440,28 +432,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
    * doesn't silently break us again.
    */
   private async settleWithPrism(
-    authorization: X402PaymentAuthorization
+    authorization: X402PaymentAuthorization,
+    ucpVersion: string
   ): Promise<PrismSettleResponse> {
-    const version = authorization.x402Version || 2
-    const response = await fetch(`${this.apiUrl}/api/v${version}/payment/settle`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": this.apiKey,
-      },
-      body: JSON.stringify({
-        x402Version: version,
-        paymentPayload: authorization.paymentPayload,
-        paymentRequirements: authorization.paymentRequirements,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error")
-      throw new Error(`Prism settle returned ${response.status}: ${errorText}`)
-    }
-
-    const raw = (await response.json()) as Record<string, unknown>
+    const raw = await this.client.settlePayment(this.paymentRequest(authorization), ucpVersion)
     const pickString = (...keys: string[]): string | undefined => {
       for (const k of keys) {
         const v = raw[k]
