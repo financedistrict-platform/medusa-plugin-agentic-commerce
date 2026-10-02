@@ -192,6 +192,18 @@ describe("PrismClient requests", () => {
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/acp/payment-requirements")
     expect(userAgentOf(fetchStub)).toBe("fd-medusa-prism/2026-08-25")
   })
+
+  it.each([undefined, "", "latest", "2026-8-25"])("rejects the UCP version %j without sending a request", async (version) => {
+    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", fetchStub)
+    const bad = version as unknown as string
+
+    await expect(client().fetchUcpHandlers(bad)).rejects.toThrow(/UCP version.*Upgrade @financedistrict\/medusa-plugin-agentic-commerce/)
+    await expect(client().fetchAcpHandlers(bad)).rejects.toThrow(/UCP version/)
+    await expect(client().prepareUcpPayment(prepareInput, bad)).rejects.toThrow(/UCP version/)
+    await expect(client().prepareAcpPayment(prepareInput, bad)).rejects.toThrow(/UCP version/)
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
 })
 
 describe("PrismPaymentHandlerAdapter version forwarding", () => {

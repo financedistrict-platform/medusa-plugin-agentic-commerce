@@ -150,7 +150,15 @@ export type X402AcceptEntry = {
 // Client
 // =====================================================
 
+const UCP_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
 function userAgent(ucpVersion: string): string {
+  if (typeof ucpVersion !== "string" || !UCP_VERSION_PATTERN.test(ucpVersion)) {
+    throw new Error(
+      `Prism call needs a UCP version date (YYYY-MM-DD) but got ${JSON.stringify(ucpVersion)}. ` +
+        "Upgrade @financedistrict/medusa-plugin-agentic-commerce together with the prism-payment plugin.",
+    )
+  }
   return `fd-medusa-prism/${ucpVersion}`
 }
 
