@@ -46,14 +46,14 @@ export interface PaymentHandlerAdapter {
    * Keyed by handler namespace (e.g., "xyz.fd.prism_payment").
    * Return empty object if nothing to advertise.
    */
-  getUcpDiscoveryHandlers(ucpVersion?: string): Promise<Record<string, unknown[]>>
+  getUcpDiscoveryHandlers(ucpVersion: string): Promise<Record<string, unknown[]>>
 
   /**
    * Return ACP discovery handler entries for .well-known/acp.json.
    * Flat array of handler objects for capabilities.payment.handlers.
    * Return empty array if nothing to advertise.
    */
-  getAcpDiscoveryHandlers(): Promise<unknown[]>
+  getAcpDiscoveryHandlers(ucpVersion: string): Promise<unknown[]>
 
   /**
    * Prepare payment requirements for a checkout session.
@@ -100,6 +100,7 @@ export type CheckoutPrepareInput = {
   checkoutBaseUrl: string
   /** Human-readable store name for payment descriptions */
   storeName: string
+  ucpVersion: string
   /** Medusa DI container for resolving services (e.g., cart module for metadata updates) */
   container: any
 }

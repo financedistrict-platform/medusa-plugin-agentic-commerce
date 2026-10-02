@@ -84,6 +84,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       cart: fullCart,
       checkoutBaseUrl,
       storeName: agenticCommerceService.getStoreName(),
+      ucpVersion: ucpVersionFor(req),
       container: req.scope,
     })
 

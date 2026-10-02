@@ -129,6 +129,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
       cart,
       checkoutBaseUrl: baseUrl,
       storeName: agenticCommerceService.getStoreName(),
+      ucpVersion: ucpVersionFor(req),
       container: req.scope,
     })
 

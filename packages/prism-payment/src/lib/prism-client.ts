@@ -19,8 +19,6 @@
  *   api_key  — Merchant API key from Prism Console
  */
 
-import { readPackageVersion } from "./package-version"
-
 // =====================================================
 // Shared payment-requirements input
 // =====================================================
@@ -152,8 +150,8 @@ export type X402AcceptEntry = {
 // Client
 // =====================================================
 
-function userAgent(): string {
-  return `fd-medusa-prism/${readPackageVersion()}`
+function userAgent(ucpVersion: string): string {
+  return `fd-medusa-prism/${ucpVersion}`
 }
 
 export type PrismClientOptions = {
@@ -178,13 +176,12 @@ export class PrismClient {
    * Fetch UCP handler descriptors for `.well-known/ucp` discovery.
    * Returns the raw Prism response keyed by handler namespace.
    */
-  async fetchUcpHandlers(ucpVersion?: string): Promise<UcpHandlersDiscoveryResponse> {
+  async fetchUcpHandlers(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
     if (!this.apiKey) {
       console.warn("[prism-client] No PRISM_API_KEY configured, returning empty UCP handlers")
       return {}
     }
-    const query = ucpVersion ? `?ucp_version=${encodeURIComponent(ucpVersion)}` : ""
-    return this.get<UcpHandlersDiscoveryResponse>(`/api/v2/merchant/ucp/handlers${query}`)
+    return this.get<UcpHandlersDiscoveryResponse>("/api/v2/merchant/ucp/handlers", ucpVersion)
   }
 
   getApiUrl(): string {
@@ -195,7 +192,7 @@ export class PrismClient {
    * Convert a fiat amount to UCP-shaped x402 payment requirements for
    * a checkout session.
    */
-  async prepareUcpPayment(input: PreparePaymentInput): Promise<UcpCheckoutPrepareResponse> {
+  async prepareUcpPayment(input: PreparePaymentInput, ucpVersion: string): Promise<UcpCheckoutPrepareResponse> {
     if (!this.apiKey) {
       console.warn("[prism-client] No PRISM_API_KEY configured, returning empty UCP prepare")
       return {}
@@ -203,6 +200,7 @@ export class PrismClient {
     return this.post<UcpCheckoutPrepareResponse>(
       "/api/v2/merchant/ucp/payment-requirements",
       this.preparePayload(input),
+      ucpVersion,
     )
   }
 
@@ -214,25 +212,26 @@ export class PrismClient {
    * Fetch ACP handler descriptors for `.well-known/acp.json` discovery.
    * Returns the raw Prism response (a flat array of handler objects).
    */
-  async fetchAcpHandlers(): Promise<AcpHandler[]> {
+  async fetchAcpHandlers(ucpVersion: string): Promise<AcpHandler[]> {
     if (!this.apiKey) {
       console.warn("[prism-client] No PRISM_API_KEY configured, returning empty ACP handlers")
       return []
     }
-    return this.get<AcpHandler[]>("/api/v2/merchant/acp/handlers")
+    return this.get<AcpHandler[]>("/api/v2/merchant/acp/handlers", ucpVersion)
   }
 
   /**
    * Convert a fiat amount to a fully-formed ACP handler descriptor for
    * a checkout session (includes the resolved x402 config).
    */
-  async prepareAcpPayment(input: PreparePaymentInput): Promise<AcpHandler> {
+  async prepareAcpPayment(input: PreparePaymentInput, ucpVersion: string): Promise<AcpHandler> {
     if (!this.apiKey) {
       throw new Error("No PRISM_API_KEY configured")
     }
     return this.post<AcpHandler>(
       "/api/v2/merchant/acp/payment-requirements",
       this.preparePayload(input),
+      ucpVersion,
     )
   }
 
@@ -251,10 +250,10 @@ export class PrismClient {
     }
   }
 
-  private async get<T>(path: string): Promise<T> {
+  private async get<T>(path: string, ucpVersion: string): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "GET",
-      headers: { "X-API-Key": this.apiKey, "User-Agent": userAgent() },
+      headers: { "X-API-Key": this.apiKey, "User-Agent": userAgent(ucpVersion) },
     })
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error")
@@ -264,13 +263,13 @@ export class PrismClient {
     return response.json() as Promise<T>
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
+  private async post<T>(path: string, body: unknown, ucpVersion: string): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": this.apiKey,
-        "User-Agent": userAgent(),
+        "User-Agent": userAgent(ucpVersion),
       },
       body: JSON.stringify(body),
     })

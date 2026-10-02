@@ -40,6 +40,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
   it("forwards cart.total in major units as a decimal string (no /100)", async () => {
     // Medusa v2 cart.total for a €17.00 cart is 17 (major units).
     await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: { id: "c1", total: 17, currency_code: "eur", metadata: {} } as any,
       checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
       storeName: "Test",
@@ -53,6 +54,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
 
   it("preserves fractional major-unit amounts (e.g., 17.50)", async () => {
     await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: { id: "c2", total: 17.5, currency_code: "usd", metadata: {} } as any,
       checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
       storeName: "Test",
@@ -63,6 +65,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
 
   it("falls back to cart.raw_total.value (also in major units) when cart.total is missing", async () => {
     await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: { id: "c3", raw_total: { value: "42" }, currency_code: "eur", metadata: {} } as any,
       checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
       storeName: "Test",
@@ -73,6 +76,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
 
   it("uppercases the cart currency for Prism", async () => {
     await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: { id: "c4", total: 10, currency_code: "eur", metadata: {} } as any,
       checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
       storeName: "Test",
@@ -83,6 +87,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
 
   it("uses the cart total amount string as the idempotency key (preparedAmount)", async () => {
     const result = await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: { id: "c5", total: 25, currency_code: "eur", metadata: {} } as any,
       checkoutBaseUrl: "https://api.test/ucp/checkout-sessions",
       storeName: "Test",
@@ -121,6 +126,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
     }
 
     await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: {
         id: "c-bn",
         total: makeMedusaBigNumber(34, "34.000000000000000000"),
@@ -152,6 +158,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
       }
     }
     await adapter.prepareCheckoutPayment({
+      ucpVersion: "2026-08-25",
       cart: {
         id: "c-bn-frac",
         total: makeMedusaBigNumber(17.5, "17.500000000000000000"),
