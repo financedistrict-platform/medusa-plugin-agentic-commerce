@@ -301,7 +301,7 @@ import {
 | `payment_provider_id` | `string` | `"pp_system_default"` | Medusa payment provider ID |
 | `payment_handler_adapters` | `string[]` | `[]` | Module keys of payment handler adapters |
 | `ucp_version` | `string` | latest (`"2026-08-25"`) | Current UCP version, served when the agent declares none. Set `"2026-04-08"` to keep the root profile of 0.x releases |
-| `ucp_supported_versions` | `string[]` | `["2026-08-25", "2026-01-23"]` | Further UCP versions served on request; the current version is removed from this list |
+| `ucp_supported_versions` | `string[]` | every known version except `ucp_version` | Further UCP versions served on request; the current version is removed from this list |
 | `ucp_version_negotiation` | `"lenient" \| "strict"` | `"lenient"` | How an unusable agent profile is handled (see UCP above) |
 | `acp_version` | `string` | `"2026-01-30"` | ACP protocol version to advertise |
 
