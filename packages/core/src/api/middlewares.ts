@@ -460,11 +460,11 @@ export default defineMiddlewares({
     },
     {
       matcher: "/ucp/carts/:id",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/carts/:id/cancel",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner, enforceSessionVersionPin],
     },
 
     // --- UCP Idempotency (required on POST/PUT) ---

@@ -49,27 +49,29 @@ describe("resolveUcpVersion", () => {
     ["undeclared", JSON.stringify({ ucp: {} }), "undeclared"],
     ["malformed", profileBody("latest"), "undeclared"],
     ["not JSON", "<html>", "undeclared"],
-    ["unknown date", profileBody("2027-01-01"), "unknown"],
   ])("falls back to the current version when the profile is %s (lenient)", async (_label, body, outcome) => {
     const resolution = await resolveUcpVersion(lenient, AGENT, fixtureFetcher(body))
     expect(resolution).toMatchObject({ version: "2026-04-08", outcome, host: "agent.example" })
     expect(resolution.rejection).toBeUndefined()
   })
 
-  it("answers 424 agent_profile_unavailable for an unreachable profile (strict)", async () => {
+  it("answers 424 profile_unreachable for an unreachable profile (strict)", async () => {
     const resolution = await resolveUcpVersion(strict, AGENT, fixtureFetcher(null))
-    expect(resolution.rejection).toEqual({ status: 424, code: "agent_profile_unavailable", content: "Agent profile could not be retrieved." })
+    expect(resolution.rejection).toEqual({ status: 424, code: "profile_unreachable", content: "Agent profile could not be retrieved." })
   })
 
-  it.each([
-    ["undeclared", JSON.stringify({ ucp: {} }), "undeclared"],
-    ["unknown date", profileBody("2027-01-01"), "2027-01-01"],
-  ])("answers 422 version_unsupported for an %s profile (strict)", async (_label, body, requested) => {
-    const resolution = await resolveUcpVersion(strict, AGENT, fixtureFetcher(body))
+  it("answers 422 profile_malformed for an undeclared profile (strict)", async () => {
+    const resolution = await resolveUcpVersion(strict, AGENT, fixtureFetcher(JSON.stringify({ ucp: {} })))
+    expect(resolution.rejection).toEqual({ status: 422, code: "profile_malformed", content: "Agent profile does not declare a UCP version." })
+  })
+
+  it.each([lenient, strict])("answers 422 version_unsupported for an unknown declared version", async (registry) => {
+    const resolution = await resolveUcpVersion(registry, AGENT, fixtureFetcher(profileBody("2027-01-01")))
+    expect(resolution.outcome).toBe("unknown")
     expect(resolution.rejection).toEqual({
       status: 422,
       code: "version_unsupported",
-      content: `Version ${requested} is not supported. This business implements versions 2026-04-08, 2026-08-25, 2026-01-23.`,
+      content: "Version 2027-01-01 is not supported. This business implements versions 2026-04-08, 2026-08-25, 2026-01-23.",
     })
   })
 
