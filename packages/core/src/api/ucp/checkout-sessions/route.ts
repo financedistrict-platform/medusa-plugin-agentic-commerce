@@ -64,7 +64,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         protocol_version: ucpVersionFor(req),
         ucp_version: (req as UcpRequestLike).ucp?.outcome === "matched" ? ucpVersionFor(req) : undefined,
         session_fingerprint: computeSessionFingerprint(req),
-      } as any,
+      },
     })
 
     // Fetch full cart for formatting (need totals for checkout-prepare)

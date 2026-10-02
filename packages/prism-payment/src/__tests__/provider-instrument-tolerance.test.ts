@@ -41,7 +41,8 @@ describe("PrismPaymentProviderService original-era instruments", () => {
     ;(provider as any).settleWithPrism = settle
   })
 
-  const authorize = (data: Record<string, unknown>) => provider.authorizePayment({ data } as any)
+  const authorize = (data: Record<string, unknown>) =>
+    provider.authorizePayment({ data: { ucp_version: "2026-01-23", ...data } } as any)
 
   it.each([
     ["instrument type tokenized", { instrument_type: "tokenized" }, credential],

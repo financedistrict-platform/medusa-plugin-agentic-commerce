@@ -298,6 +298,15 @@ describe("Prism provider payment calls", () => {
     const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded } } as any)
 
     expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("settlement_error: payment session is missing ucp_version")
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
+
+  it("throws on capture when the session has no UCP version", async () => {
+    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", fetchStub)
+
+    await expect(provider().capturePayment({ data: { x402_authorization: encoded } } as any)).rejects.toThrow("missing ucp_version")
     expect(fetchStub).not.toHaveBeenCalled()
   })
 })

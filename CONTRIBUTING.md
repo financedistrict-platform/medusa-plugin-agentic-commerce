@@ -39,7 +39,7 @@ If you're a maintainer and need to release manually (rare), run `npm run version
 
 ### Protocol-bump policy
 
-When changing a UCP/ACP protocol type that ripples through both `core` and the handler packages, write a changeset that bumps **all** affected packages together (typically `minor` while pre-1.0). The changeset CLI lets you select multiple packages in one entry — use that.
+When changing a UCP/ACP protocol type that ripples through both `core` and the handler packages, write a changeset that bumps **all** affected packages together (follow-ups and protocol or content changes ship as `patch` bumps, never `minor`). The changeset CLI lets you select multiple packages in one entry — use that.
 
 For larger changes, open an issue first to discuss the direction. Saves both sides time.
 

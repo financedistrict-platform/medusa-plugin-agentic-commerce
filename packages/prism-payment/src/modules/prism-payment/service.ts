@@ -44,6 +44,14 @@ import { PrismClient } from "../../lib/prism-client"
  *   authorizePayment -> validates EIP-3009 authorization, optionally verifies with Prism
  *   capturePayment   -> calls Prism /api/v2/payment/settle for on-chain execution
  */
+function requireUcpVersion(data: Record<string, unknown>): string {
+  const version = data.ucp_version
+  if (typeof version !== "string" || version.length === 0) {
+    throw new Error("payment session is missing ucp_version")
+  }
+  return version
+}
+
 class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentConfig> {
   static identifier = "prism"
 
@@ -175,7 +183,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     // Optionally verify with Prism before authorizing
     if (this.verifyBeforeSettle) {
       try {
-        const verifyResult = await this.verifyWithPrism(authorization, data.ucp_version as string)
+        const verifyResult = await this.verifyWithPrism(authorization, requireUcpVersion(data))
         if (!verifyResult.isValid) {
           return {
             data: { ...data, error: `prism_verification_failed: ${verifyResult.error ?? "unknown"}` },
@@ -192,7 +200,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     // If auto_capture, settle immediately during authorization
     if (this.autoCapture) {
       try {
-        const settleResult = await this.settleWithPrism(authorization, data.ucp_version as string)
+        const settleResult = await this.settleWithPrism(authorization, requireUcpVersion(data))
         if (!settleResult.success) {
           const reason = settleResult.errorReason ?? "unknown"
           return {
@@ -276,7 +284,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         Buffer.from(authorizationB64, "base64").toString("utf-8")
       ) as X402PaymentAuthorization
 
-      const settleResult = await this.settleWithPrism(authorization, data.ucp_version as string)
+      const settleResult = await this.settleWithPrism(authorization, requireUcpVersion(data))
       if (!settleResult.success) {
         throw new Error(
           `Settlement failed: ${settleResult.errorReason ?? "unknown"}`
