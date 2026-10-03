@@ -1,5 +1,11 @@
 # @financedistrict/medusa-plugin-prism-payment
 
+## 1.1.2
+
+### Patch Changes
+
+- [#31](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/31) [`5dfb5af`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/5dfb5af1cca030079fd13315ccaef2a2559195e9) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Authorize and capture reject a payment session that has no `ucp_version` with a clear error, instead of sending an unchecked value to Prism. This change landed in [#28](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/issues/28) without a changeset.
+
 ## 1.1.1
 
 ### Patch Changes
