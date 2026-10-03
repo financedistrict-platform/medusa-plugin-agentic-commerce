@@ -150,6 +150,8 @@ export type X402AcceptEntry = {
 // Client
 // =====================================================
 
+import { SETTLEMENT_FALLBACK_UCP_VERSION } from "./settlement-ucp-version"
+
 const UCP_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 function userAgent(ucpVersion: string): string {
@@ -160,6 +162,12 @@ function userAgent(ucpVersion: string): string {
     )
   }
   return `fd-medusa-prism/${ucpVersion}`
+}
+
+function settlementUserAgent(ucpVersion: unknown): string {
+  const version =
+    typeof ucpVersion === "string" && UCP_VERSION_PATTERN.test(ucpVersion) ? ucpVersion : SETTLEMENT_FALLBACK_UCP_VERSION
+  return userAgent(version)
 }
 
 export type PrismPaymentRequest = {
@@ -214,7 +222,7 @@ export class PrismClient {
     return this.post<UcpCheckoutPrepareResponse>(
       "/api/v2/merchant/ucp/payment-requirements",
       this.preparePayload(input),
-      ucpVersion,
+      userAgent(ucpVersion),
     )
   }
 
@@ -245,16 +253,24 @@ export class PrismClient {
     return this.post<AcpHandler>(
       "/api/v2/merchant/acp/payment-requirements",
       this.preparePayload(input),
-      ucpVersion,
+      userAgent(ucpVersion),
     )
   }
 
-  async verifyPayment(request: PrismPaymentRequest, ucpVersion: string): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(`/api/v${request.x402Version}/payment/verify`, request, ucpVersion)
+  async verifyPayment(request: PrismPaymentRequest, ucpVersion?: unknown): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(
+      `/api/v${request.x402Version}/payment/verify`,
+      request,
+      settlementUserAgent(ucpVersion),
+    )
   }
 
-  async settlePayment(request: PrismPaymentRequest, ucpVersion: string): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(`/api/v${request.x402Version}/payment/settle`, request, ucpVersion)
+  async settlePayment(request: PrismPaymentRequest, ucpVersion?: unknown): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(
+      `/api/v${request.x402Version}/payment/settle`,
+      request,
+      settlementUserAgent(ucpVersion),
+    )
   }
 
   // -------------------------------------------------
@@ -285,13 +301,13 @@ export class PrismClient {
     return response.json() as Promise<T>
   }
 
-  private async post<T>(path: string, body: unknown, ucpVersion: string): Promise<T> {
+  private async post<T>(path: string, body: unknown, agent: string): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": this.apiKey,
-        "User-Agent": userAgent(ucpVersion),
+        "User-Agent": agent,
       },
       body: JSON.stringify(body),
     })
