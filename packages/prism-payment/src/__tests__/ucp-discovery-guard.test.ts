@@ -291,22 +291,45 @@ describe("Prism provider payment calls", () => {
     expect(session.data).toMatchObject({ ucp_version: "2026-04-08" })
   })
 
-  it("fails without a request when the session has no UCP version", async () => {
-    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
+  const userAgents = (fetchStub: ReturnType<typeof vi.fn>) =>
+    (fetchStub.mock.calls as unknown as [string, RequestInit][]).map(
+      ([, init]) => (init.headers as Record<string, string>)["User-Agent"],
+    )
+  const okFetch = () =>
+    vi.fn(async (url: string) =>
+      new Response(JSON.stringify(url.endsWith("/verify") ? { isValid: true } : { success: true, transaction: "0xtx" }), { status: 200 }),
+    )
+
+  it("authorizes without auto capture and settles on capture with the default version when the session has none", async () => {
+    const fetchStub = okFetch()
+    vi.stubGlobal("fetch", fetchStub)
+    const manual = new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key", auto_capture: false } as any)
+
+    const authorized = await manual.authorizePayment({ data: { eip3009_authorization: encoded } } as any)
+    expect(authorized.status).toBe("authorized")
+    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25"])
+
+    const captured = await manual.capturePayment({ data: authorized.data } as any)
+    expect((captured.data as Record<string, unknown>).prism_tx_id).toBe("0xtx")
+    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25", "fd-medusa-prism/2026-08-25"])
+  })
+
+  it("settles with auto capture using the default version when the session has none", async () => {
+    const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
     const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded } } as any)
 
-    expect(result.status).toBe("error")
-    expect((result.data as Record<string, unknown>).error).toBe("settlement_error: payment session is missing ucp_version")
-    expect(fetchStub).not.toHaveBeenCalled()
+    expect(result.status).toBe("authorized")
+    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25", "fd-medusa-prism/2026-08-25"])
   })
 
-  it("throws on capture when the session has no UCP version", async () => {
-    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
+  it("falls back to the default version when the session version is not a date", async () => {
+    const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
-    await expect(provider().capturePayment({ data: { x402_authorization: encoded } } as any)).rejects.toThrow("missing ucp_version")
-    expect(fetchStub).not.toHaveBeenCalled()
+    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest" } } as any)
+
+    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25"])
   })
 })
