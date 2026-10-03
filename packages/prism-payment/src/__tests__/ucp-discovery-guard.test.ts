@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
-import { PrismClient, isContractEntry, normalizeUcpHandlers } from "../lib/prism-client"
+import { PRISM_USER_AGENT, PrismClient, isContractEntry, normalizeUcpHandlers } from "../lib/prism-client"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const PRISM_FIXTURES = join(__dirname, "..", "..", "..", "core", "src", "__fixtures__", "prism")
@@ -154,61 +154,63 @@ describe("PrismClient requests", () => {
     vi.unstubAllGlobals()
   })
 
-  it("sends the UCP version as User-Agent and no query on UCP handlers", async () => {
+  it("uses the package version in the constant User-Agent", () => {
+    const { version } = JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf8"))
+    expect(PRISM_USER_AGENT).toBe(`fd-medusa-prism/${version}`)
+  })
+
+  it("puts the UCP version in the path of UCP handlers and sends the constant User-Agent", async () => {
     const fetchStub = vi.fn(async () => new Response(JSON.stringify(contractResponse), { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
     await client().fetchUcpHandlers(UCP_VERSION)
 
-    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/handlers")
-    expect(userAgentOf(fetchStub)).toBe("fd-medusa-prism/2026-08-25")
+    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/2026-08-25/handlers")
+    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
-  it("sends the UCP version as User-Agent and no query on ACP handlers", async () => {
+  it("calls unversioned ACP handlers with the constant User-Agent", async () => {
     const fetchStub = vi.fn(async () => new Response("[]", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
-    await client().fetchAcpHandlers("2026-04-08")
+    await client().fetchAcpHandlers()
 
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/acp/handlers")
-    expect(userAgentOf(fetchStub)).toBe("fd-medusa-prism/2026-04-08")
+    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
-  it("sends the UCP version as User-Agent on UCP payment-requirements", async () => {
+  it("puts the UCP version in the path of UCP payment-requirements", async () => {
     const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
     await client().prepareUcpPayment(prepareInput, "2026-01-23")
 
-    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/payment-requirements")
-    expect(userAgentOf(fetchStub)).toBe("fd-medusa-prism/2026-01-23")
+    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/2026-01-23/payment-requirements")
+    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
-  it("sends the UCP version as User-Agent on ACP payment-requirements", async () => {
+  it("calls unversioned ACP payment-requirements with the constant User-Agent", async () => {
     const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
-    await client().prepareAcpPayment(prepareInput, UCP_VERSION)
+    await client().prepareAcpPayment(prepareInput)
 
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/acp/payment-requirements")
-    expect(userAgentOf(fetchStub)).toBe("fd-medusa-prism/2026-08-25")
+    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
-  it.each([undefined, "", "latest", "2026-8-25"])("rejects the UCP version %j without sending a request", async (version) => {
+  it("encodes the UCP version segment", async () => {
     const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
-    const bad = version as unknown as string
 
-    await expect(client().fetchUcpHandlers(bad)).rejects.toThrow(/UCP version.*Upgrade @financedistrict\/medusa-plugin-agentic-commerce/)
-    await expect(client().fetchAcpHandlers(bad)).rejects.toThrow(/UCP version/)
-    await expect(client().prepareUcpPayment(prepareInput, bad)).rejects.toThrow(/UCP version/)
-    await expect(client().prepareAcpPayment(prepareInput, bad)).rejects.toThrow(/UCP version/)
-    expect(fetchStub).not.toHaveBeenCalled()
+    await client().fetchUcpHandlers("a/b")
+
+    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/a%2Fb/handlers")
   })
 })
 
 describe("PrismPaymentHandlerAdapter version forwarding", () => {
-  it("passes the checkout request version to both prepare calls", async () => {
+  it("passes the checkout request version to UCP prepare only", async () => {
     const adapter = new PrismPaymentHandlerAdapter({}, {})
     const prepareUcp = vi.fn().mockResolvedValue({ ok: true })
     const prepareAcp = vi.fn().mockResolvedValue({ ok: true })
@@ -223,21 +225,19 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
     })
 
     expect(prepareUcp.mock.calls[0][1]).toBe("2026-01-23")
-    expect(prepareAcp.mock.calls[0][1]).toBe("2026-01-23")
+    expect(prepareAcp.mock.calls[0]).toHaveLength(1)
   })
 
-  it("asks Prism for ACP handlers with the given version and caches per version", async () => {
+  it("asks Prism for ACP handlers without a version and caches the result", async () => {
     const adapter = new PrismPaymentHandlerAdapter({}, {})
     const fetchAcp = vi.fn().mockResolvedValue([])
     ;(adapter as any).client = { fetchAcpHandlers: fetchAcp, getApiUrl: () => "https://gw.test" }
 
-    await adapter.getAcpDiscoveryHandlers("2026-08-25")
-    await adapter.getAcpDiscoveryHandlers("2026-08-25")
-    await adapter.getAcpDiscoveryHandlers("2026-04-08")
+    await adapter.getAcpDiscoveryHandlers()
+    await adapter.getAcpDiscoveryHandlers()
 
-    expect(fetchAcp).toHaveBeenCalledTimes(2)
-    expect(fetchAcp).toHaveBeenNthCalledWith(1, "2026-08-25")
-    expect(fetchAcp).toHaveBeenNthCalledWith(2, "2026-04-08")
+    expect(fetchAcp).toHaveBeenCalledTimes(1)
+    expect(fetchAcp).toHaveBeenCalledWith()
   })
 })
 
@@ -252,15 +252,21 @@ describe("Prism provider payment calls", () => {
   }
   const encoded = Buffer.from(JSON.stringify(authorization)).toString("base64")
   const provider = () => new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key" } as any)
+  const userAgents = (fetchStub: ReturnType<typeof vi.fn>) =>
+    (fetchStub.mock.calls as unknown as [string, RequestInit][]).map(
+      ([, init]) => (init.headers as Record<string, string>)["User-Agent"],
+    )
+  const okFetch = () =>
+    vi.fn(async (url: string) =>
+      new Response(JSON.stringify(url.endsWith("/verify") ? { isValid: true } : { success: true, transaction: "0xtx" }), { status: 200 }),
+    )
 
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it("sends the session UCP version as User-Agent on verify and settle", async () => {
-    const fetchStub = vi.fn(async (url: string) =>
-      new Response(JSON.stringify(url.endsWith("/verify") ? { isValid: true } : { success: true, transaction: "0xtx" }), { status: 200 }),
-    )
+  it("sends the constant User-Agent on verify and settle whatever the session version is", async () => {
+    const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
     const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded, ucp_version: "2026-01-23" } } as any)
@@ -271,19 +277,16 @@ describe("Prism provider payment calls", () => {
       "https://gw.test/api/v2/payment/verify",
       "https://gw.test/api/v2/payment/settle",
     ])
-    for (const [, init] of calls) {
-      expect((init.headers as Record<string, string>)["User-Agent"]).toBe("fd-medusa-prism/2026-01-23")
-    }
+    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT, PRISM_USER_AGENT])
   })
 
-  it("settles on capture with the version kept in the session data", async () => {
+  it("settles on capture with the constant User-Agent", async () => {
     const fetchStub = vi.fn(async () => new Response(JSON.stringify({ success: true, transaction: "0xtx" }), { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
-    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "2026-08-25" } } as any)
+    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest" } } as any)
 
-    const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit]
-    expect((init.headers as Record<string, string>)["User-Agent"]).toBe("fd-medusa-prism/2026-08-25")
+    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT])
   })
 
   it("carries the UCP version from the payment session input", async () => {
@@ -291,45 +294,17 @@ describe("Prism provider payment calls", () => {
     expect(session.data).toMatchObject({ ucp_version: "2026-04-08" })
   })
 
-  const userAgents = (fetchStub: ReturnType<typeof vi.fn>) =>
-    (fetchStub.mock.calls as unknown as [string, RequestInit][]).map(
-      ([, init]) => (init.headers as Record<string, string>)["User-Agent"],
-    )
-  const okFetch = () =>
-    vi.fn(async (url: string) =>
-      new Response(JSON.stringify(url.endsWith("/verify") ? { isValid: true } : { success: true, transaction: "0xtx" }), { status: 200 }),
-    )
-
-  it("authorizes without auto capture and settles on capture with the default version when the session has none", async () => {
+  it("authorizes without auto capture and settles on capture", async () => {
     const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
     const manual = new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key", auto_capture: false } as any)
 
     const authorized = await manual.authorizePayment({ data: { eip3009_authorization: encoded } } as any)
     expect(authorized.status).toBe("authorized")
-    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25"])
+    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT])
 
     const captured = await manual.capturePayment({ data: authorized.data } as any)
     expect((captured.data as Record<string, unknown>).prism_tx_id).toBe("0xtx")
-    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25", "fd-medusa-prism/2026-08-25"])
-  })
-
-  it("settles with auto capture using the default version when the session has none", async () => {
-    const fetchStub = okFetch()
-    vi.stubGlobal("fetch", fetchStub)
-
-    const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded } } as any)
-
-    expect(result.status).toBe("authorized")
-    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25", "fd-medusa-prism/2026-08-25"])
-  })
-
-  it("falls back to the default version when the session version is not a date", async () => {
-    const fetchStub = okFetch()
-    vi.stubGlobal("fetch", fetchStub)
-
-    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest" } } as any)
-
-    expect(userAgents(fetchStub)).toEqual(["fd-medusa-prism/2026-08-25"])
+    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT, PRISM_USER_AGENT])
   })
 })
