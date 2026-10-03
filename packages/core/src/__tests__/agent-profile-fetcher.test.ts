@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs"
+import { EventEmitter } from "node:events"
 import http from "node:http"
+import https from "node:https"
 import type { AddressInfo } from "node:net"
 import { join } from "node:path"
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest"
 import {
   AGENT_PROFILE_CACHE_MAX_ENTRIES,
   AGENT_PROFILE_CACHE_TTL_MS,
@@ -40,7 +42,6 @@ beforeAll(async () => {
     const locations: Record<string, string | undefined> = {
       "/cross": "https://other.example/profile",
       "/cross-userinfo": "https://user:secret@other.example/p",
-      "/downgrade": "http://127.0.0.1:1/profile",
       "/userinfo": `http://user:pass@127.0.0.1:${new URL(base).port}/profile`,
       "/twice": "/redirect",
       "/missing": undefined,
@@ -134,9 +135,25 @@ describe("createAgentProfileFetcher", () => {
     expect(await fetcher.lookup(`${base}/cross-userinfo`)).toEqual({ status: "redirected", location: "https://other.example/p" })
   })
 
-  it("reports a scheme downgrade redirect", async () => {
-    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
-    expect(await fetcher.lookup(`${base}/downgrade`)).toEqual({ status: "redirected", location: "http://127.0.0.1:1/profile" })
+  it("reports an https to http downgrade on the same host and port", async () => {
+    const requests: string[] = []
+    const spy = vi.spyOn(https, "request").mockImplementation(((url: URL, _options: unknown, callback: (res: unknown) => void) => {
+      requests.push(url.href)
+      const response = Object.assign(new EventEmitter(), {
+        statusCode: 302,
+        headers: { location: "http://agent.example:8443/profile" },
+        resume: () => undefined,
+      })
+      queueMicrotask(() => callback(response))
+      return Object.assign(new EventEmitter(), { destroy: () => undefined, end: () => undefined })
+    }) as never)
+    try {
+      const fetcher = createAgentProfileFetcher({ lookupHost: async () => [{ address: "93.184.216.34", family: 4 }] })
+      expect(await fetcher.lookup("https://agent.example:8443/profile")).toEqual({ status: "redirected", location: "http://agent.example:8443/profile" })
+      expect(requests).toEqual(["https://agent.example:8443/profile"])
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it("reports a redirect whose Location carries userinfo", async () => {
