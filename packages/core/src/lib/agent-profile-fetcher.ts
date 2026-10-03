@@ -9,14 +9,22 @@ export const AGENT_PROFILE_CACHE_MAX_ENTRIES = 1000
 export const AGENT_PROFILE_MAX_IN_FLIGHT = 16
 export const AGENT_PROFILE_MAX_BYTES = 131_072
 export const AGENT_PROFILE_TIMEOUT_MS = 3_000
+export const AGENT_PROFILE_MAX_LOCATION_LENGTH = 512
 
 const VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const LOOPBACK_TEST_HOST = "127.0.0.1"
+const REDIRECT_STATUSES = [301, 302, 303, 307, 308]
 
 export type AgentProfileResult =
   | { status: "ok"; version: string | null }
   | { status: "failed" }
+  | { status: "redirected"; location: string | null }
   | { status: "busy" }
+
+type DownloadResult =
+  | { kind: "body"; body: string }
+  | { kind: "redirect"; location: string | null }
+  | { kind: "failed" }
 
 export type ResolvedAddress = { address: string; family: number }
 
@@ -138,11 +146,26 @@ async function fetchProfile(
     target = addresses[0]
   }
 
-  const body = await download(url, target, loopback)
-  if (body === null) return { status: "failed" }
+  const deadline = Date.now() + AGENT_PROFILE_TIMEOUT_MS
+  let downloaded = await download(url, target, loopback, AGENT_PROFILE_TIMEOUT_MS)
+
+  if (downloaded.kind === "redirect") {
+    const next = absoluteLocation(downloaded.location, url)
+    if (!next) return { status: "redirected", location: null }
+    if (!isSameOriginHop(url, next)) return { status: "redirected", location: truncateLocation(next) }
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return { status: "failed" }
+    downloaded = await download(next, target, loopback, remaining)
+    if (downloaded.kind === "redirect") {
+      const second = absoluteLocation(downloaded.location, next)
+      return { status: "redirected", location: second ? truncateLocation(second) : null }
+    }
+  }
+
+  if (downloaded.kind === "failed") return { status: "failed" }
 
   try {
-    const parsed = JSON.parse(body) as { ucp?: { version?: unknown } }
+    const parsed = JSON.parse(downloaded.body) as { ucp?: { version?: unknown } }
     const version = parsed?.ucp?.version
     return { status: "ok", version: typeof version === "string" && VERSION_PATTERN.test(version) ? version : null }
   } catch {
@@ -150,10 +173,32 @@ async function fetchProfile(
   }
 }
 
-function download(url: URL, target: ResolvedAddress, loopback: boolean): Promise<string | null> {
+function absoluteLocation(location: string | null, base: URL): URL | null {
+  if (!location) return null
+  try {
+    const next = new URL(location, base)
+    next.hash = ""
+    return next
+  } catch {
+    return null
+  }
+}
+
+function isSameOriginHop(from: URL, to: URL): boolean {
+  return to.origin === from.origin && to.username === "" && to.password === ""
+}
+
+function truncateLocation(url: URL): string {
+  const reported = new URL(url)
+  reported.username = ""
+  reported.password = ""
+  return reported.href.slice(0, AGENT_PROFILE_MAX_LOCATION_LENGTH)
+}
+
+function download(url: URL, target: ResolvedAddress, loopback: boolean, timeoutMs: number): Promise<DownloadResult> {
   return new Promise((resolve) => {
     let settled = false
-    const finish = (value: string | null) => {
+    const finish = (value: DownloadResult) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
@@ -173,13 +218,20 @@ function download(url: URL, target: ResolvedAddress, loopback: boolean): Promise
     const request = transport.request(url, {
       method: "GET",
       lookup: pinnedLookup as never,
-      timeout: AGENT_PROFILE_TIMEOUT_MS,
+      timeout: timeoutMs,
       headers: { "user-agent": `fd-medusa-ucp/${readPackageVersion()}`, accept: "application/json" },
     }, (response) => {
+      if (response.statusCode !== undefined && REDIRECT_STATUSES.includes(response.statusCode)) {
+        const location = response.headers.location
+        response.resume()
+        request.destroy()
+        finish({ kind: "redirect", location: typeof location === "string" && location !== "" ? location : null })
+        return
+      }
       if (response.statusCode !== 200) {
         response.resume()
         request.destroy()
-        finish(null)
+        finish({ kind: "failed" })
         return
       }
       const chunks: Buffer[] = []
@@ -188,25 +240,25 @@ function download(url: URL, target: ResolvedAddress, loopback: boolean): Promise
         size += chunk.length
         if (size > AGENT_PROFILE_MAX_BYTES) {
           request.destroy()
-          finish(null)
+          finish({ kind: "failed" })
           return
         }
         chunks.push(chunk)
       })
-      response.on("end", () => finish(Buffer.concat(chunks).toString("utf8")))
-      response.on("error", () => finish(null))
+      response.on("end", () => finish({ kind: "body", body: Buffer.concat(chunks).toString("utf8") }))
+      response.on("error", () => finish({ kind: "failed" }))
     })
 
     const timer = setTimeout(() => {
       request.destroy()
-      finish(null)
-    }, AGENT_PROFILE_TIMEOUT_MS)
+      finish({ kind: "failed" })
+    }, timeoutMs)
 
     request.on("timeout", () => {
       request.destroy()
-      finish(null)
+      finish({ kind: "failed" })
     })
-    request.on("error", () => finish(null))
+    request.on("error", () => finish({ kind: "failed" }))
     request.end()
   })
 }

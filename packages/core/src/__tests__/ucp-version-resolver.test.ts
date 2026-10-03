@@ -60,6 +60,27 @@ describe("resolveUcpVersion", () => {
     expect(resolution.rejection).toEqual({ status: 424, code: "profile_unreachable", content: "Agent profile could not be retrieved." })
   })
 
+  it.each([lenient, strict])("answers 424 profile_redirected with the Location", async (registry) => {
+    const fetcher: AgentProfileFetcher = { lookup: async () => ({ status: "redirected", location: "https://agent.example/profile" }) }
+    const resolution = await resolveUcpVersion(registry, AGENT, fetcher)
+    expect(resolution).toMatchObject({ outcome: "redirected", location: "https://agent.example/profile", host: "agent.example" })
+    expect(resolution.rejection).toEqual({
+      status: 424,
+      code: "profile_redirected",
+      content: "Agent profile URL redirects to https://agent.example/profile; use the final URL.",
+    })
+  })
+
+  it.each([lenient, strict])("answers 424 profile_redirected without a Location", async (registry) => {
+    const fetcher: AgentProfileFetcher = { lookup: async () => ({ status: "redirected", location: null }) }
+    const resolution = await resolveUcpVersion(registry, AGENT, fetcher)
+    expect(resolution.rejection).toEqual({
+      status: 424,
+      code: "profile_redirected",
+      content: "Agent profile URL redirects; use the final URL.",
+    })
+  })
+
   it("answers 422 profile_malformed for an undeclared profile (strict)", async () => {
     const resolution = await resolveUcpVersion(strict, AGENT, fixtureFetcher(JSON.stringify({ ucp: {} })))
     expect(resolution.rejection).toEqual({ status: 422, code: "profile_malformed", content: "Agent profile does not declare a UCP version." })
