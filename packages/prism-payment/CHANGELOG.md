@@ -1,5 +1,11 @@
 # @financedistrict/medusa-plugin-prism-payment
 
+## 1.1.3
+
+### Patch Changes
+
+- [#33](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/33) [`f6665a7`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/f6665a76a120da65d3e3a0d34b6eb88ff4060cc3) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Verify and settle no longer fail when the payment session has no valid `ucp_version`. They send the Prism User-Agent with the latest known UCP version instead, so authorized payments can always be captured. Discovery and prepare calls still require the negotiated version.
+
 ## 1.1.2
 
 ### Patch Changes
