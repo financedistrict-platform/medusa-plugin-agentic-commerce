@@ -178,6 +178,7 @@ function logUcpResolution(req: MedusaRequest, resolution: UcpResolution) {
     ucp_profile_resolution: resolution.outcome,
     served: resolution.rejection ? null : resolution.version,
     host: resolution.host ?? null,
+    ...(resolution.outcome === "redirected" ? { location: resolution.location ?? null } : {}),
   }))
 }
 

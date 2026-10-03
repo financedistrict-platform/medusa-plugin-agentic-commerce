@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs"
+import { EventEmitter } from "node:events"
 import http from "node:http"
+import https from "node:https"
 import type { AddressInfo } from "node:net"
 import { join } from "node:path"
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest"
 import {
   AGENT_PROFILE_CACHE_MAX_ENTRIES,
   AGENT_PROFILE_CACHE_TTL_MS,
@@ -30,6 +32,25 @@ beforeAll(async () => {
     }
     if (req.url === "/redirect") {
       res.writeHead(302, { location: "/profile" }).end()
+      return
+    }
+    const redirectMatch = /^\/r(301|308)$/.exec(req.url ?? "")
+    if (redirectMatch) {
+      res.writeHead(Number(redirectMatch[1]), { location: "/profile/" }).end()
+      return
+    }
+    const locations: Record<string, string | undefined> = {
+      "/cross": "https://other.example/profile",
+      "/cross-userinfo": "https://user:secret@other.example/p",
+      "/userinfo": `http://user:pass@127.0.0.1:${new URL(base).port}/profile`,
+      "/twice": "/redirect",
+      "/missing": undefined,
+      "/long": `https://other.example/${"a".repeat(600)}`,
+      "/to-big": "/big",
+    }
+    if (req.url && req.url in locations) {
+      const location = locations[req.url]
+      res.writeHead(302, location === undefined ? {} : { location }).end()
       return
     }
     res.setHeader("content-type", "application/json")
@@ -84,11 +105,85 @@ describe("createAgentProfileFetcher", () => {
     expect(await fetcher.lookup("https://agent.example/.well-known/ucp")).toEqual({ status: "failed" })
   })
 
-  it("does not follow redirects and caps the body at 64 KiB", async () => {
+  it("caps the body at 128 KiB", async () => {
     const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
-    expect(await fetcher.lookup(`${base}/redirect`)).toEqual({ status: "failed" })
     expect(await fetcher.lookup(`${base}/big`)).toEqual({ status: "failed" })
-    expect(hits.map((h) => h.url)).toEqual(["/redirect", "/big"])
+  })
+
+  it.each(["/r301", "/r308"])("follows one same-origin redirect from %s", async (path) => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}${path}`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(hits.map((h) => h.url)).toEqual([path, "/profile/"])
+  })
+
+  it("caches the redirect result under the original URL only", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}/redirect`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(await fetcher.lookup(`${base}/redirect`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(hits.map((h) => h.url)).toEqual(["/redirect", "/profile", "/profile"])
+  })
+
+  it("reports a cross-origin redirect without following it", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}/cross`)).toEqual({ status: "redirected", location: "https://other.example/profile" })
+    expect(hits).toHaveLength(1)
+  })
+
+  it("strips userinfo from a reported cross-origin Location", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}/cross-userinfo`)).toEqual({ status: "redirected", location: "https://other.example/p" })
+  })
+
+  it("reports an https to http downgrade on the same host and port", async () => {
+    const requests: string[] = []
+    const spy = vi.spyOn(https, "request").mockImplementation(((url: URL, _options: unknown, callback: (res: unknown) => void) => {
+      requests.push(url.href)
+      const response = Object.assign(new EventEmitter(), {
+        statusCode: 302,
+        headers: { location: "http://agent.example:8443/profile" },
+        resume: () => undefined,
+      })
+      queueMicrotask(() => callback(response))
+      return Object.assign(new EventEmitter(), { destroy: () => undefined, end: () => undefined })
+    }) as never)
+    try {
+      const fetcher = createAgentProfileFetcher({ lookupHost: async () => [{ address: "93.184.216.34", family: 4 }] })
+      expect(await fetcher.lookup("https://agent.example:8443/profile")).toEqual({ status: "redirected", location: "http://agent.example:8443/profile" })
+      expect(requests).toEqual(["https://agent.example:8443/profile"])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("reports a redirect whose Location carries userinfo", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    const result = await fetcher.lookup(`${base}/userinfo`)
+    expect(result).toEqual({ status: "redirected", location: `${base}/profile` })
+    expect(hits).toHaveLength(1)
+  })
+
+  it("reports a second redirect instead of following it", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}/twice`)).toEqual({ status: "redirected", location: `${base}/profile` })
+    expect(hits.map((h) => h.url)).toEqual(["/twice", "/redirect"])
+  })
+
+  it("reports a redirect without a Location header", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}/missing`)).toEqual({ status: "redirected", location: null })
+  })
+
+  it("truncates a long Location to 512 characters", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    const result = await fetcher.lookup(`${base}/long`)
+    expect(result.status === "redirected" && result.location?.length).toBe(512)
+  })
+
+  it("still caps the body after a redirect", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await fetcher.lookup(`${base}/to-big`)).toEqual({ status: "failed" })
+    expect(hits.map((h) => h.url)).toEqual(["/to-big", "/big"])
   })
 
   it("caches a failure for 600 s without fetching again", async () => {

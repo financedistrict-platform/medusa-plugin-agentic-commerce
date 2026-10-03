@@ -5,7 +5,7 @@ export { ucpSpecBase } from "./ucp-wire/types"
 
 export const UCP_VERSION = DEFAULT_CURRENT_UCP_VERSION
 
-export type UcpProfileOutcome = "none" | "matched" | "undeclared" | "unknown" | "unreachable" | "disabled"
+export type UcpProfileOutcome = "none" | "matched" | "undeclared" | "unknown" | "unreachable" | "disabled" | "redirected"
 
 export type ResolvedUcp = {
   version: string
@@ -13,6 +13,7 @@ export type ResolvedUcp = {
   outcome: UcpProfileOutcome
   declared?: string
   host?: string
+  location?: string
 }
 
 export type UcpRequestLike = {

@@ -36,8 +36,17 @@ function hostOf(url: string): string {
   }
 }
 
-function served(registry: UcpVersionRegistry, version: string, outcome: UcpProfileOutcome, declared?: string, host?: string): UcpResolution {
-  return { version, wire: registry.wire(version), outcome, declared, host }
+function served(
+  registry: UcpVersionRegistry,
+  version: string,
+  outcome: UcpProfileOutcome,
+  declared?: string,
+  host?: string,
+  location?: string,
+): UcpResolution {
+  const resolution: UcpResolution = { version, wire: registry.wire(version), outcome, declared, host }
+  if (location !== undefined) resolution.location = location
+  return resolution
 }
 
 function rejected(
@@ -46,8 +55,9 @@ function rejected(
   rejection: UcpResolutionRejection,
   declared?: string,
   host?: string,
+  location?: string,
 ): UcpResolution {
-  return { ...served(registry, registry.current, outcome, declared, host), rejection }
+  return { ...served(registry, registry.current, outcome, declared, host, location), rejection }
 }
 
 export async function resolveUcpVersion(
@@ -63,11 +73,30 @@ export async function resolveUcpVersion(
   const declared = profile.status === "ok" && profile.version ? profile.version : undefined
 
   let outcome: UcpProfileOutcome
-  if (profile.status !== "ok") outcome = "unreachable"
-  else if (!declared) outcome = "undeclared"
-  else if (!registry.isKnown(declared)) outcome = "unknown"
-  else if (!registry.isEnabled(declared)) outcome = "disabled"
-  else outcome = "matched"
+  switch (profile.status) {
+    case "ok":
+      if (!declared) outcome = "undeclared"
+      else if (!registry.isKnown(declared)) outcome = "unknown"
+      else if (!registry.isEnabled(declared)) outcome = "disabled"
+      else outcome = "matched"
+      break
+    case "redirected":
+      return rejected(registry, "redirected", {
+        status: 424,
+        code: "profile_redirected",
+        content: profile.location === null
+          ? "Agent profile URL redirects; use the final URL."
+          : `Agent profile URL redirects to ${profile.location}; use the final URL.`,
+      }, undefined, host, profile.location ?? undefined)
+    case "failed":
+    case "busy":
+      outcome = "unreachable"
+      break
+    default: {
+      const unhandled: never = profile
+      throw new Error(`Unhandled agent profile status: ${JSON.stringify(unhandled)}`)
+    }
+  }
 
   if (outcome === "matched") return served(registry, declared!, outcome, declared, host)
 
