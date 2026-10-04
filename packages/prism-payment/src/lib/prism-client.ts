@@ -90,10 +90,6 @@ export type X402AcceptEntry = {
   extra?: Record<string, unknown> | null
 }
 
-import pkg from "../../package.json"
-
-export const PRISM_USER_AGENT = `fd-medusa-prism/${pkg.version}`
-
 export type PrismPaymentRequest = {
   x402Version: number
   paymentPayload: unknown
@@ -183,7 +179,7 @@ export class PrismClient {
   private async get<T>(path: string): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "GET",
-      headers: { "X-API-Key": this.apiKey, "User-Agent": PRISM_USER_AGENT },
+      headers: { "X-API-Key": this.apiKey },
     })
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error")
@@ -199,7 +195,6 @@ export class PrismClient {
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": this.apiKey,
-        "User-Agent": PRISM_USER_AGENT,
       },
       body: JSON.stringify(body),
     })
