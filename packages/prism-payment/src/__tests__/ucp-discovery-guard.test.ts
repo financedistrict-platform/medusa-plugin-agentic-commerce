@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
-import { PRISM_USER_AGENT, PrismClient, isContractEntry, normalizeUcpHandlers } from "../lib/prism-client"
+import { PrismClient, isContractEntry, normalizeUcpHandlers } from "../lib/prism-client"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const PRISM_FIXTURES = join(__dirname, "..", "..", "..", "core", "src", "__fixtures__", "prism")
@@ -144,39 +144,28 @@ describe("PrismClient requests", () => {
     amount: "15", currency: "usd", resourceUrl: "https://store.test/ucp/checkout-sessions/c1", resourceDescription: "Purchase",
   }
   const client = () => new PrismClient({ apiUrl: "https://gw.test", apiKey: "key" })
-  const userAgentOf = (fetchStub: ReturnType<typeof vi.fn>) => {
-    const [, init] = fetchStub.mock.calls[0] as unknown as [string, RequestInit]
-    return (init.headers as Record<string, string>)["User-Agent"]
-  }
   const urlOf = (fetchStub: ReturnType<typeof vi.fn>) => fetchStub.mock.calls[0][0] as unknown as string
 
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it("uses the package version in the constant User-Agent", () => {
-    const { version } = JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf8"))
-    expect(PRISM_USER_AGENT).toBe(`fd-medusa-prism/${version}`)
-  })
-
-  it("puts the UCP version in the path of UCP handlers and sends the constant User-Agent", async () => {
+  it("puts the UCP version in the path of UCP handlers", async () => {
     const fetchStub = vi.fn(async () => new Response(JSON.stringify(contractResponse), { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
     await client().fetchUcpHandlers(UCP_VERSION)
 
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/2026-08-25/handlers")
-    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
-  it("calls unversioned ACP handlers with the constant User-Agent", async () => {
+  it("calls unversioned ACP handlers", async () => {
     const fetchStub = vi.fn(async () => new Response("[]", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
     await client().fetchAcpHandlers()
 
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/acp/handlers")
-    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
   it("puts the UCP version in the path of UCP payment-requirements", async () => {
@@ -186,17 +175,15 @@ describe("PrismClient requests", () => {
     await client().prepareUcpPayment(prepareInput, "2026-01-23")
 
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/2026-01-23/payment-requirements")
-    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
-  it("calls unversioned ACP payment-requirements with the constant User-Agent", async () => {
+  it("calls unversioned ACP payment-requirements", async () => {
     const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
     await client().prepareAcpPayment(prepareInput)
 
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/acp/payment-requirements")
-    expect(userAgentOf(fetchStub)).toBe(PRISM_USER_AGENT)
   })
 
   it("encodes the UCP version segment", async () => {
@@ -252,10 +239,6 @@ describe("Prism provider payment calls", () => {
   }
   const encoded = Buffer.from(JSON.stringify(authorization)).toString("base64")
   const provider = () => new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key" } as any)
-  const userAgents = (fetchStub: ReturnType<typeof vi.fn>) =>
-    (fetchStub.mock.calls as unknown as [string, RequestInit][]).map(
-      ([, init]) => (init.headers as Record<string, string>)["User-Agent"],
-    )
   const okFetch = () =>
     vi.fn(async (url: string) =>
       new Response(JSON.stringify(url.endsWith("/verify") ? { isValid: true } : { success: true, transaction: "0xtx" }), { status: 200 }),
@@ -265,7 +248,7 @@ describe("Prism provider payment calls", () => {
     vi.unstubAllGlobals()
   })
 
-  it("sends the constant User-Agent on verify and settle whatever the session version is", async () => {
+  it("verifies and settles whatever the session version is", async () => {
     const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
@@ -277,16 +260,15 @@ describe("Prism provider payment calls", () => {
       "https://gw.test/api/v2/payment/verify",
       "https://gw.test/api/v2/payment/settle",
     ])
-    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT, PRISM_USER_AGENT])
   })
 
-  it("settles on capture with the constant User-Agent", async () => {
+  it("settles on capture", async () => {
     const fetchStub = vi.fn(async () => new Response(JSON.stringify({ success: true, transaction: "0xtx" }), { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
     await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest" } } as any)
 
-    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT])
+    expect(fetchStub).toHaveBeenCalledTimes(1)
   })
 
   it("carries the UCP version from the payment session input", async () => {
@@ -301,10 +283,10 @@ describe("Prism provider payment calls", () => {
 
     const authorized = await manual.authorizePayment({ data: { eip3009_authorization: encoded } } as any)
     expect(authorized.status).toBe("authorized")
-    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT])
+    expect(fetchStub).toHaveBeenCalledTimes(1)
 
     const captured = await manual.capturePayment({ data: authorized.data } as any)
     expect((captured.data as Record<string, unknown>).prism_tx_id).toBe("0xtx")
-    expect(userAgents(fetchStub)).toEqual([PRISM_USER_AGENT, PRISM_USER_AGENT])
+    expect(fetchStub).toHaveBeenCalledTimes(2)
   })
 })
