@@ -2,6 +2,8 @@ import { z } from "@medusajs/framework/zod"
 
 // --- Shared schemas ---
 
+const CurrencyCodeSchema = z.string().transform((code) => code.trim().toLowerCase())
+
 // Medusa internal address format (used by workflows)
 const MedusaAddressSchema = z.object({
   first_name: z.string().optional(),
@@ -113,7 +115,7 @@ const UcpBuyerSchema = z.object({
 // additionalProperties: false in spec — we keep it tolerant but don't accept non-spec fields here.
 export const CreateAcpCheckoutSessionSchema = z.object({
   line_items: z.array(AcpItemSchema).min(1),
-  currency: z.string(),
+  currency: CurrencyCodeSchema,
   capabilities: AcpCapabilitiesSchema,
   buyer: AcpBuyerSchema.optional(),
   fulfillment_details: AcpFulfillmentDetailsSchema.optional(),
@@ -181,7 +183,7 @@ export const CreateUcpCheckoutSessionSchema = z.object({
     address_country: z.string().optional(),
     address_region: z.string().optional(),
     postal_code: z.string().optional(),
-    currency: z.string().optional(),
+    currency: CurrencyCodeSchema.optional(),
     language: z.string().optional(),
   }).optional(),
   buyer: UcpBuyerSchema.optional(),
@@ -254,7 +256,7 @@ export const CreateUcpCartSchema = z.object({
     address_country: z.string().optional(),
     address_region: z.string().optional(),
     postal_code: z.string().optional(),
-    currency: z.string().optional(),
+    currency: CurrencyCodeSchema.optional(),
     language: z.string().optional(),
   }).optional(),
   buyer: UcpBuyerSchema.optional(),
