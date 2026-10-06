@@ -17,13 +17,11 @@ import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service
 describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit handling", () => {
   let adapter: PrismPaymentHandlerAdapter
   let preparePaymentSpy: ReturnType<typeof vi.fn>
-  let prepareAcpSpy: ReturnType<typeof vi.fn>
   let updateCartsSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     adapter = new PrismPaymentHandlerAdapter({}, {})
     preparePaymentSpy = vi.fn().mockResolvedValue({ ok: true })
-    prepareAcpSpy = vi.fn().mockResolvedValue({ ok: true })
     updateCartsSpy = vi.fn().mockResolvedValue(undefined)
     // Inject our spies via the private client field — the adapter never
     // re-creates the client after construction.
@@ -31,7 +29,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
       getApiUrl: () => "https://api.test",
       fetchUcpHandlers: vi.fn().mockResolvedValue({ "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-10-07", spec: "https://api.test/spec.md", schema: "https://api.test/schema.json", config: {} }] }),
       preparePayment: preparePaymentSpy,
-      prepareAcpPayment: prepareAcpSpy,
+      fetchAcpHandlers: vi.fn().mockResolvedValue([]),
     }
   })
 
@@ -51,7 +49,6 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
     expect(preparePaymentSpy).toHaveBeenCalledTimes(1)
     // The bug produced "0.17" here; major-unit contract requires "17".
     expect(preparePaymentSpy.mock.calls[0][0].amount).toBe("17")
-    expect(prepareAcpSpy.mock.calls[0][0].amount).toBe("17")
   })
 
   it("preserves fractional major-unit amounts (e.g., 17.50)", async () => {
@@ -142,7 +139,6 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
 
     // Without the Number() coercion this would be "34.000000000000000000".
     expect(preparePaymentSpy.mock.calls[0][0].amount).toBe("34")
-    expect(prepareAcpSpy.mock.calls[0][0].amount).toBe("34")
   })
 
   it("preserves fractional values on Medusa BigNumber (e.g., 17.5)", async () => {
