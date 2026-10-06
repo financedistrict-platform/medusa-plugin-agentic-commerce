@@ -169,7 +169,7 @@ describe("PrismClient requests", () => {
 
     await client().fetchUcpHandlers(UCP_VERSION)
 
-    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/2026-08-25/handlers")
+    expect(urlOf(fetchStub)).toBe("https://gw.test/ucp/2026-08-25/handlers")
   })
 
   it("calls unversioned ACP handlers", async () => {
@@ -196,7 +196,7 @@ describe("PrismClient requests", () => {
 
     await client().fetchUcpHandlers("a/b")
 
-    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/ucp/a%2Fb/handlers")
+    expect(urlOf(fetchStub)).toBe("https://gw.test/ucp/a%2Fb/handlers")
   })
 })
 
