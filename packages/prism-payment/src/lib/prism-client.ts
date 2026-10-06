@@ -122,13 +122,12 @@ export class PrismClient {
     return this.apiUrl
   }
 
-  async prepareUcpPayment(input: PreparePaymentInput, ucpVersion: string): Promise<UcpCheckoutPrepareResponse> {
+  async preparePayment(input: PreparePaymentInput): Promise<PaymentHandlerConfig> {
     if (!this.apiKey) {
-      console.warn("[prism-client] No PRISM_API_KEY configured, returning empty UCP prepare")
-      return {}
+      throw new Error("No PRISM_API_KEY configured")
     }
-    return this.post<UcpCheckoutPrepareResponse>(
-      `/api/v2/merchant/ucp/${encodeURIComponent(ucpVersion)}/payment-requirements`,
+    return this.post<PaymentHandlerConfig>(
+      "/api/v2/merchant/payment-requirements",
       this.preparePayload(input),
     )
   }

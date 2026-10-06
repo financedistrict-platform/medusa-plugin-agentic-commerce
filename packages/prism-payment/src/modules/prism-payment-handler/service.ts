@@ -5,6 +5,7 @@ import {
   normalizeUcpHandlers,
   type AcpHandler,
   type PaymentHandlerConfig,
+  type PreparePaymentInput,
   type UcpCheckoutPrepareResponse,
   type UcpHandlersDiscoveryResponse,
 } from "../../lib/prism-client"
@@ -78,7 +79,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     }
 
     const [ucpResult, acpResult] = await Promise.allSettled([
-      this.client.prepareUcpPayment(prepareInput, ucpVersion),
+      this.prepareUcp(prepareInput, ucpVersion),
       this.client.prepareAcpPayment(prepareInput),
     ])
 
@@ -157,6 +158,15 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       "x402Version" in value &&
       "accepts" in value
     )
+  }
+
+  private async prepareUcp(input: PreparePaymentInput, ucpVersion: string): Promise<UcpCheckoutPrepareResponse> {
+    const declaration = (await this.fetchUcpDiscovery(ucpVersion))[PRISM_HANDLER_ID]?.[0]
+    if (!declaration) {
+      throw new Error(`no ${PRISM_HANDLER_ID} declaration for UCP ${ucpVersion}`)
+    }
+    const config = await this.client.preparePayment(input)
+    return { [PRISM_HANDLER_ID]: [{ id: declaration.id, version: declaration.version, config }] }
   }
 
   private async fetchUcpDiscovery(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
