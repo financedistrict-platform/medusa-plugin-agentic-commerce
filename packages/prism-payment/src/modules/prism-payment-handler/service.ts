@@ -5,7 +5,6 @@ import {
   normalizeUcpHandlers,
   type AcpHandler,
   type PaymentHandlerConfig,
-  type PreparePaymentInput,
   type UcpCheckoutPrepareResponse,
   type UcpHandlersDiscoveryResponse,
 } from "../../lib/prism-client"
@@ -78,28 +77,30 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       resourceDescription: `Purchase from ${storeName}`,
     }
 
-    const [ucpResult, acpResult] = await Promise.allSettled([
-      this.prepareUcp(prepareInput, ucpVersion),
-      this.client.prepareAcpPayment(prepareInput),
+    const [ucpDeclaration, acpDeclaration] = await Promise.all([
+      this.fetchUcpDiscovery(ucpVersion).then((discovery) => discovery[PRISM_HANDLER_ID]?.[0]),
+      this.fetchAcpDiscovery().then((handlers) => handlers[0]),
     ])
 
-    const ucp = ucpResult.status === "fulfilled" ? ucpResult.value : null
-    const acp = acpResult.status === "fulfilled" ? acpResult.value : null
-
-    if (ucpResult.status === "rejected") {
-      console.error(
-        `[prism-payment-handler] UCP prepare failed for cart ${cart.id}: ${ucpResult.reason}`,
-      )
-    }
-    if (acpResult.status === "rejected") {
-      console.error(
-        `[prism-payment-handler] ACP prepare failed for cart ${cart.id}: ${acpResult.reason}`,
-      )
-    }
-
-    if (!ucp && !acp) {
+    if (!ucpDeclaration && !acpDeclaration) {
+      console.error(`[prism-payment-handler] No UCP or ACP declaration available for cart ${cart.id}`)
+      await this.clearStoredQuote(cart, container)
       return null
     }
+
+    let config: PaymentHandlerConfig
+    try {
+      config = await this.client.preparePayment(prepareInput)
+    } catch (error: unknown) {
+      console.error(`[prism-payment-handler] Prepare failed for cart ${cart.id}: ${error}`)
+      await this.clearStoredQuote(cart, container)
+      return null
+    }
+
+    const ucp: UcpCheckoutPrepareResponse | null = ucpDeclaration
+      ? { [PRISM_HANDLER_ID]: [{ id: ucpDeclaration.id, version: ucpDeclaration.version, config }] }
+      : null
+    const acp: AcpHandler | null = acpDeclaration ? { ...acpDeclaration, config } : null
 
     const data: PrismCheckoutData = {
       ucp,
@@ -160,13 +161,20 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     )
   }
 
-  private async prepareUcp(input: PreparePaymentInput, ucpVersion: string): Promise<UcpCheckoutPrepareResponse> {
-    const declaration = (await this.fetchUcpDiscovery(ucpVersion))[PRISM_HANDLER_ID]?.[0]
-    if (!declaration) {
-      throw new Error(`no ${PRISM_HANDLER_ID} declaration for UCP ${ucpVersion}`)
+  private async clearStoredQuote(
+    cart: CheckoutPrepareInput["cart"],
+    container: CheckoutPrepareInput["container"],
+  ): Promise<void> {
+    if (!cart.metadata?.[PRISM_CHECKOUT_DATA_KEY]) return
+    try {
+      const cartModuleService = container.resolve("cart") as any
+      await cartModuleService.updateCarts(cart.id, {
+        metadata: { ...cart.metadata, [PRISM_CHECKOUT_DATA_KEY]: null },
+      })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error"
+      console.error(`[prism-payment-handler] Failed to clear stale quote on cart ${cart.id}: ${message}`)
     }
-    const config = await this.client.preparePayment(input)
-    return { [PRISM_HANDLER_ID]: [{ id: declaration.id, version: declaration.version, config }] }
   }
 
   private async fetchUcpDiscovery(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {

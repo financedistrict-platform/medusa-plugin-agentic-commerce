@@ -10,6 +10,19 @@ const PRISM_FIXTURES = join(__dirname, "..", "..", "..", "core", "src", "__fixtu
 
 const recorded = (name: string) => JSON.parse(readFileSync(join(PRISM_FIXTURES, name), "utf8"))
 
+const acpDeclaration = {
+  id: "x402",
+  name: "xyz.fd.prism_payment",
+  version: "2026-01-15",
+  spec: "https://gw.test/acp/prism.md",
+  requires_delegate_payment: false,
+  requires_pci_compliance: false,
+  psp: "prism",
+  config_schema: "https://gw.test/acp/config-schema.json",
+  instrument_schemas: ["https://gw.test/acp/instrument-schema.json"],
+  config: {},
+}
+
 const contractResponse = {
   [HANDLER_ID]: [{
     id: HANDLER_ID,
@@ -177,15 +190,6 @@ describe("PrismClient requests", () => {
     expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/payment-requirements")
   })
 
-  it("calls unversioned ACP payment-requirements", async () => {
-    const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
-    vi.stubGlobal("fetch", fetchStub)
-
-    await client().prepareAcpPayment(prepareInput)
-
-    expect(urlOf(fetchStub)).toBe("https://gw.test/api/v2/merchant/acp/payment-requirements")
-  })
-
   it("encodes the UCP version segment", async () => {
     const fetchStub = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
@@ -207,15 +211,14 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
   } as any)
   const adapterWith = (client: Record<string, unknown>) => {
     const adapter = new PrismPaymentHandlerAdapter({}, {})
-    ;(adapter as any).client = { getApiUrl: () => "https://gw.test", prepareAcpPayment: vi.fn().mockResolvedValue({ ok: true }), ...client }
+    ;(adapter as any).client = { getApiUrl: () => "https://gw.test", fetchAcpHandlers: vi.fn().mockResolvedValue([acpDeclaration]), ...client }
     return adapter
   }
 
   it("composes the UCP checkout entry from discovery of the same UCP version", async () => {
     const fetchUcpHandlers = vi.fn().mockResolvedValue(contractResponse)
     const preparePayment = vi.fn().mockResolvedValue(rawConfig)
-    const prepareAcpPayment = vi.fn().mockResolvedValue({ ok: true })
-    const adapter = adapterWith({ fetchUcpHandlers, preparePayment, prepareAcpPayment })
+    const adapter = adapterWith({ fetchUcpHandlers, preparePayment })
 
     const result = await prepareFor(adapter)
 
@@ -225,25 +228,55 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
     expect(result?.ucp?.[HANDLER_ID][0].version).toBe(discovered.version)
     expect(fetchUcpHandlers).toHaveBeenCalledTimes(1)
     expect(fetchUcpHandlers).toHaveBeenCalledWith("2026-01-23")
+    expect(preparePayment).toHaveBeenCalledTimes(1)
     expect(preparePayment.mock.calls[0]).toHaveLength(1)
-    expect(prepareAcpPayment.mock.calls[0]).toHaveLength(1)
+  })
+
+  it("composes the ACP checkout entry from the cached ACP declaration", async () => {
+    const fetchAcpHandlers = vi.fn().mockResolvedValue([acpDeclaration])
+    const preparePayment = vi.fn().mockResolvedValue(rawConfig)
+    const adapter = adapterWith({ fetchUcpHandlers: vi.fn().mockResolvedValue(contractResponse), fetchAcpHandlers, preparePayment })
+
+    const result = await prepareFor(adapter)
+
+    expect(result?.acp).toEqual({ ...acpDeclaration, config: rawConfig })
+    const [discovered] = await adapter.getAcpDiscoveryHandlers()
+    for (const key of ["id", "name", "version", "spec", "requires_delegate_payment", "requires_pci_compliance", "psp", "config_schema", "instrument_schemas"] as const) {
+      expect(result?.acp?.[key]).toEqual(discovered[key])
+    }
+    expect(fetchAcpHandlers).toHaveBeenCalledTimes(1)
+    expect(preparePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("stores no ACP entry when ACP discovery is empty", async () => {
+    const preparePayment = vi.fn().mockResolvedValue(rawConfig)
+    const adapter = adapterWith({
+      fetchUcpHandlers: vi.fn().mockResolvedValue(contractResponse),
+      fetchAcpHandlers: vi.fn().mockResolvedValue([]),
+      preparePayment,
+    })
+
+    const result = await prepareFor(adapter)
+
+    expect(result?.acp).toBeNull()
+    expect(result?.ucp).not.toBeNull()
+    expect(preparePayment).toHaveBeenCalledTimes(1)
   })
 
   it("stores no UCP entry when discovery has no declaration", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const preparePayment = vi.fn()
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const preparePayment = vi.fn().mockResolvedValue(rawConfig)
     const adapter = adapterWith({ fetchUcpHandlers: vi.fn().mockResolvedValue({}), preparePayment })
 
     const result = await prepareFor(adapter)
 
     expect(result?.ucp).toBeNull()
-    expect(result?.acp).toEqual({ ok: true })
-    expect(preparePayment).not.toHaveBeenCalled()
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("UCP prepare failed for cart c1"))
+    expect(result?.acp).toEqual({ ...acpDeclaration, config: rawConfig })
+    expect(preparePayment).toHaveBeenCalledTimes(1)
     vi.restoreAllMocks()
   })
 
-  it("stores no UCP entry when payment-requirements fails", async () => {
+  it("stores nothing when payment-requirements fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const adapter = adapterWith({
       fetchUcpHandlers: vi.fn().mockResolvedValue(contractResponse),
@@ -252,9 +285,30 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
 
     const result = await prepareFor(adapter)
 
-    expect(result?.ucp).toBeNull()
-    expect(result?.acp).toEqual({ ok: true })
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("UCP prepare failed for cart c1"))
+    expect(result).toBeNull()
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Prepare failed for cart c1"))
+    vi.restoreAllMocks()
+  })
+
+  it("clears the stored quote when a re-prepare fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const updateCarts = vi.fn().mockResolvedValue(undefined)
+    const adapter = adapterWith({
+      fetchUcpHandlers: vi.fn().mockResolvedValue(contractResponse),
+      preparePayment: vi.fn().mockRejectedValue(new Error("Prism POST failed: 500")),
+    })
+    const stale = { ucp: null, acp: null, preparedAmount: "4", preparedResourceUrl: "https://store.test/ucp/checkout-sessions/c1" }
+
+    const result = await adapter.prepareCheckoutPayment({
+      cart: { id: "c1", total: 5, currency_code: "usd", metadata: { other: 1, prism_checkout_data: stale } },
+      checkoutBaseUrl: "https://store.test/ucp/checkout-sessions",
+      storeName: "Test",
+      ucpVersion: "2026-01-23",
+      container: { resolve: () => ({ updateCarts }) },
+    } as any)
+
+    expect(result).toBeNull()
+    expect(updateCarts).toHaveBeenCalledWith("c1", { metadata: { other: 1, prism_checkout_data: null } })
     vi.restoreAllMocks()
   })
 
