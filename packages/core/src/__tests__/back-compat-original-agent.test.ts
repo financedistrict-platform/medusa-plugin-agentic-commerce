@@ -29,7 +29,7 @@ const originalBody = {
       credential: {
         x402Version: 2,
         paymentPayload: {
-          accepted: { network: "eip155:84532", asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+          accepted: { network: "eip155:84532", asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", amount: "1000000", payTo: "0x1111111111111111111111111111111111111111" },
           payload: { authorization: { value: "1000000", to: "0x1111111111111111111111111111111111111111" } },
         },
       },

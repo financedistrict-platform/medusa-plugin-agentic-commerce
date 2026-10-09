@@ -199,6 +199,8 @@ A standard Medusa v2 payment provider that handles the settlement side:
 | `refundPayment` | Initiates refund through Prism |
 | `cancelPayment` | Cancels the payment session |
 
+Network, token, recipient and amount come from the quote stored for the cart, never from the credential. A credential is accepted only when the requirements it declares (`paymentPayload.accepted`) match that quote, and Prism is always asked to verify and settle against the quoted requirements. The optional `supported_chains` option limits the quoted networks the provider will settle on; list network names such as `base` or CAIP-2 identifiers such as `eip155:8453`. When it is not set, the quote alone decides the network.
+
 ## Configuration
 
 ### Prism Gateway

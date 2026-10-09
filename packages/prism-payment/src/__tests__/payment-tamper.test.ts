@@ -131,6 +131,12 @@ describe("Prism provider tamper cases", () => {
     await expectRejected(await sessionData(provider, credential({ validAfter: later })), "authorization_not_yet_valid")
   })
 
+  it("rejects an authorization that carries no signature", async () => {
+    const cred = credential()
+    delete (cred.paymentPayload as Record<string, any>).payload.signature
+    await expectRejected(await sessionData(provider, cred), "missing_eip3009_fields")
+  })
+
   it("rejects an authorization without a nonce", async () => {
     await expectRejected(await sessionData(provider, credential({ nonce: undefined })), "missing_eip3009_fields")
   })
@@ -180,6 +186,95 @@ describe("Prism provider tamper cases", () => {
       { ...data, payment_quote: { ...quote, accepts: [{ ...quotedEntry, amount: "1" }] } },
       "invalid_quote_signature",
     )
+  })
+
+  it("rejects declared requirements that name a different amount than the quote", async () => {
+    await expectRejected(
+      await sessionData(provider, credential({ declared: { amount: "1" } })),
+      "accepted_requirements_mismatch",
+    )
+  })
+
+  it("rejects declared requirements that name a different recipient than the quote", async () => {
+    await expectRejected(
+      await sessionData(provider, credential({ declared: { payTo: "0x3333333333333333333333333333333333333333" } })),
+      "accepted_requirements_mismatch",
+    )
+  })
+
+  it("rejects declared requirements that name a different scheme than the quote", async () => {
+    await expectRejected(
+      await sessionData(provider, credential({ declared: { scheme: "upto" } })),
+      "accepted_requirements_mismatch",
+    )
+  })
+
+  it("rejects a credential that declares no requirements even when the buyer names the quoted network and token elsewhere", async () => {
+    await expectRejected(
+      await sessionData(provider, credential({ omitAccepted: true, legacyNetwork: NETWORK })),
+      "no_matching_quote_entry",
+    )
+  })
+
+  it("forwards the quoted requirements as the declared requirements", async () => {
+    const result = await provider.authorizePayment({
+      data: await sessionData(provider, credential({ declared: { extra: { name: "Worthless", version: "9" }, maxTimeoutSeconds: 1 } })),
+    } as any)
+
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment.mock.calls[0][0].paymentPayload.accepted).toEqual(quotedEntry)
+    expect(client.verifyPayment.mock.calls[0][0].paymentPayload.accepted).toEqual(quotedEntry)
+  })
+
+  it("forwards only the signed fields of the payload and nothing else the buyer attached", async () => {
+    const cred = credential()
+    const payload = cred.paymentPayload as Record<string, any>
+    payload.extensions = { gasSponsoring: { info: "buyer" } }
+    payload.resource = { url: "https://elsewhere.test" }
+    payload.payload.extra = "buyer"
+    payload.payload.authorization.extra = "buyer"
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, cred) } as any)
+
+    expect(result.status).toBe("authorized")
+    const forwarded = client.settlePayment.mock.calls[0][0].paymentPayload
+    expect(forwarded).toEqual({
+      x402Version: 2,
+      accepted: quotedEntry,
+      payload: { signature: "0xsig", authorization: expect.not.objectContaining({ extra: expect.anything() }) },
+    })
+    expect(Object.keys(forwarded.payload.authorization).sort()).toEqual(["from", "nonce", "to", "validAfter", "validBefore", "value"])
+  })
+
+  it("does not forward a network the buyer put on the payload next to the declared requirements", async () => {
+    const result = await provider.authorizePayment({
+      data: await sessionData(provider, credential({ legacyNetwork: "eip155:1" })),
+    } as any)
+
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment.mock.calls[0][0].paymentPayload).not.toHaveProperty("network")
+  })
+
+  it("checks the configured chains against the quoted network", async () => {
+    ;({ provider, client } = makeProvider({ supported_chains: ["base"] }))
+    await expectRejected(await sessionData(provider, credential()), "unsupported_chain")
+  })
+
+  it.each([["base-sepolia"], ["eip155:84532"], ["Base-Sepolia"]])("accepts the quoted network when the configured chains list %s", async (chain) => {
+    ;({ provider, client } = makeProvider({ supported_chains: [chain] }))
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+    expect(result.status).toBe("authorized")
+  })
+
+  it("rejects capture of a stored authorization when the configured chains no longer include the quoted network", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    const authorized = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+    ;({ provider, client } = makeProvider({ auto_capture: false, supported_chains: ["base"] }))
+
+    await expect(provider.capturePayment({ data: authorized.data } as any)).rejects.toThrow("unsupported_chain")
+    expect(client.settlePayment).not.toHaveBeenCalled()
   })
 
   it("settles against the requirements rebuilt from the stored quote, not the buyer's", async () => {
