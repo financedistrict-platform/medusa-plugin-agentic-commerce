@@ -90,6 +90,16 @@ export type PrismSettleResponse = {
   network?: string
   /** Reason string when `success: false` */
   errorReason?: string
+  /** What was settled, only present when the reply was reconciled with the quote */
+  settled?: SettledPayment
+}
+
+export type SettledPayment = {
+  transaction: string
+  network: string
+  asset: string
+  /** Atomic units, equal to the quoted amount */
+  amount: string
 }
 
 /** Request to Prism Gateway POST /api/v2/payment/verify */

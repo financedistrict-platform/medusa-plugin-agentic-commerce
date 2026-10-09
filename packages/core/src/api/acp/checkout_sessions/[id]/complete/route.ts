@@ -6,6 +6,7 @@ import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
 import { checkQuoteBinding, isPrismProvider, PRISM_UCP_HANDLER_ID } from "../../../../../lib/ucp-complete-guard"
 import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
+import { recordSettledPayment } from "../../../../../lib/settled-payment-record"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -31,8 +32,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }))
     return
   }
-
-  const query = req.scope.resolve("query") as any
 
   if (isPrismProvider(paymentProviderId)) {
     const session = await agentSessions(req.scope).find(id)
@@ -69,27 +68,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     })
 
-    // Enrich cart metadata with payment details and completion timestamp
-    const { data: [cartForMeta] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata", "total", "currency_code"],
-      filters: { id },
-    })
-    if (cartForMeta) {
-      const cartModuleService = req.scope.resolve("cart") as any
-      await cartModuleService.updateCarts(id, {
-        metadata: {
-          ...cartForMeta.metadata,
-          payment_method: eip3009Authorization ? "x402" : "other",
-          payment_amount: cartForMeta.total != null ? String(cartForMeta.total / 100) : null,
-          payment_currency: cartForMeta.currency_code || null,
-          checkout_session_completed_at: new Date().toISOString(),
-        },
-      })
-    }
-
-    // Fetch completed cart for formatting (includes the cart→order link)
-    const cart = await fetchSessionCart(req.scope, id)
+    const completedCart = await fetchSessionCart(req.scope, id)
+    const cart = completedCart
+      ? await recordSettledPayment(req.scope, id, completedCart, eip3009Authorization ? "x402" : "other")
+      : completedCart
 
     // Resolve order id: prefer the workflow result, fall back to the cart link.
     const orderId: string | null =

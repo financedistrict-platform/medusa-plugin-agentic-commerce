@@ -4,6 +4,7 @@ import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-f
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
 import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
+import { recordSettledPayment, settledSessionData } from "../../../../../lib/settled-payment-record"
 import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
 import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
@@ -62,8 +63,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { eip3009Authorization, signedSummary, x402Version, handlerId, instrumentType } = extraction.payment
   const instrument = body.payment!.instruments[0]
 
-  const query = req.scope.resolve("query") as any
-
   if (isPrismProvider(paymentProviderId)) {
     const instrumentFailure = checkPrismInstrument(instrument)
     if (instrumentFailure) {
@@ -94,27 +93,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     })
 
-    // Enrich cart metadata with payment details and completion timestamp
-    const { data: [cartForMeta] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata", "total", "currency_code"],
-      filters: { id },
-    })
-    if (cartForMeta) {
-      const cartModuleService = req.scope.resolve("cart") as any
-      await cartModuleService.updateCarts(id, {
-        metadata: {
-          ...cartForMeta.metadata,
-          payment_method: eip3009Authorization ? "x402" : "other",
-          payment_amount: cartForMeta.total != null ? String(cartForMeta.total / 100) : null,
-          payment_currency: cartForMeta.currency_code || null,
-          checkout_session_completed_at: new Date().toISOString(),
-        },
-      })
-    }
-
-    // Fetch completed cart for formatting (includes the cart→order link)
-    const cart = await fetchSessionCart(req.scope, id)
+    const completedCart = await fetchSessionCart(req.scope, id)
+    const cart = completedCart
+      ? await recordSettledPayment(req.scope, id, completedCart, eip3009Authorization ? "x402" : "other")
+      : completedCart
 
     // Resolve the actual order id from whichever source is available.
     // The workflow result is authoritative for a fresh completion, but the cart's
@@ -140,11 +122,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     // transaction_network) that any blockchain-settling payment provider can
     // populate. Falls back to the Prism-specific keys for older provider
     // versions.
-    const paymentSessions = (cart as any)?.payment_collection?.payment_sessions || []
-    const activeSession = paymentSessions.find((s: any) =>
-      s.status === "authorized" || s.status === "captured"
-    ) || paymentSessions[0]
-    const sessionData = activeSession?.data || {}
+    const sessionData = settledSessionData(cart as any)
     const txReference: string | null =
       sessionData.transaction_reference || sessionData.prism_tx_id || null
     const txStatus: string | null =

@@ -85,17 +85,17 @@ function base64Credential(value: string) {
 
 function setup(
   credential: Record<string, unknown>,
-  options: { quote?: unknown; providerId?: string } = {},
+  options: { quote?: unknown; providerId?: string; cart?: Record<string, unknown>; services?: Record<string, unknown> } = {},
 ) {
   const quote = "quote" in options ? options.quote : storedQuote
   const providerId = options.providerId ?? "pp_prism_prism"
   const { service } = createStoreService({ version: "2026-04-08" })
   ;(service as any).getPaymentProviderId = () => providerId
-  const cart = { id: "cart_1", items: [], metadata: {} }
+  const cart = { id: "cart_1", items: [], metadata: {}, ...options.cart }
   const query = { graph: vi.fn(async () => ({ data: [cart] })) }
   completeRun.mockClear()
   const req = {
-    ...createRequest({ agenticCommerce: service, query, agenticCommerceSession: sessionsHolding(quote) }, { id: "cart_1" }),
+    ...createRequest({ agenticCommerce: service, query, agenticCommerceSession: sessionsHolding(quote), ...options.services }, { id: "cart_1" }),
     body: { payment: { instruments: [{ id: "i1", handler_id: HANDLER_ID, type: "x402", credential }] } },
   }
   return { req: req as any, res: createResponse() as any }
@@ -273,6 +273,92 @@ describe("declared payment requirements checked against the quote", () => {
 
     expect(completeRun).not.toHaveBeenCalled()
     expect(res.statusCode).toBe(422)
+  })
+})
+
+describe("completed checkout records what was settled", () => {
+  const settledSession = {
+    status: "captured",
+    data: {
+      prism_tx_id: "0xtx",
+      transaction_reference: "0xtx",
+      transaction_network: "eip155:84532",
+      settled_amount: QUOTED_AMOUNT,
+      settled_asset: "0xasset",
+    },
+  }
+
+  function completedWith(sessions: unknown[]) {
+    const updateCarts = vi.fn(async () => ({}))
+    const { req, res } = setup(
+      { type: "x402", x402Version: 2, paymentPayload: signedPayload(QUOTED_AMOUNT) },
+      {
+        cart: { total: QUOTED_TOTAL, currency_code: "usd", payment_collection: { payment_sessions: sessions } },
+        services: { cart: { updateCarts } },
+      },
+    )
+    completeRun.mockResolvedValueOnce({ result: { order_id: "order_1" } } as never)
+    return { req, res, updateCarts }
+  }
+
+  function completedAcpWith(sessions: unknown[]) {
+    const { req, res, updateCarts } = completedWith(sessions)
+    req.validatedBody = {
+      payment_data: {
+        handler_id: HANDLER_ID,
+        instrument: { credential: { authorization: base64Credential(QUOTED_AMOUNT) } },
+      },
+    }
+    return { req, res, updateCarts }
+  }
+
+  const recorded = (updateCarts: ReturnType<typeof vi.fn>) =>
+    (updateCarts.mock.calls[0] as unknown as [string, { metadata: Record<string, unknown> }])[1].metadata
+
+  it.each([
+    ["UCP", completedWith, ucpComplete],
+    ["ACP", completedAcpWith, acpComplete],
+  ])("records the order total in its own unit and the settled value on the %s route", async (_protocol, prepare, route) => {
+    const { req, res, updateCarts } = prepare([settledSession])
+
+    await route(req, res)
+
+    expect(res.statusCode).toBe(200)
+    expect(recorded(updateCarts)).toMatchObject({
+      payment_amount: String(QUOTED_TOTAL),
+      payment_currency: "usd",
+      payment_settled_value: QUOTED_AMOUNT,
+      payment_settled_asset: "0xasset",
+      payment_settled_network: "eip155:84532",
+      payment_transaction: "0xtx",
+    })
+  })
+
+  it.each([
+    ["UCP", completedWith, ucpComplete],
+    ["ACP", completedAcpWith, acpComplete],
+  ])("still reports the completed order on the %s route when the settlement record cannot be written", async (_protocol, prepare, route) => {
+    const { req, res, updateCarts } = prepare([settledSession])
+    updateCarts.mockRejectedValueOnce(new Error("cart write failed"))
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    await route(req, res)
+
+    expect(res.statusCode).toBe(200)
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("cart write failed"))
+    logged.mockRestore()
+  })
+
+  it.each([
+    ["UCP", completedWith, ucpComplete],
+    ["ACP", completedAcpWith, acpComplete],
+  ])("records no payment amount on the %s route when the session reports no settlement", async (_protocol, prepare, route) => {
+    const { req, res, updateCarts } = prepare([{ status: "authorized", data: {} }])
+
+    await route(req, res)
+
+    expect(recorded(updateCarts).payment_amount).toBeNull()
+    expect(recorded(updateCarts).payment_transaction).toBeNull()
   })
 })
 
