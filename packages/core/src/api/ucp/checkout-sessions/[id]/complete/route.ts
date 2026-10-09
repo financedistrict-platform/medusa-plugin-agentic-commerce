@@ -61,24 +61,25 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { eip3009Authorization, signedSummary, x402Version, handlerId, instrumentType } = extraction.payment
   const instrument = body.payment!.instruments[0]
 
+  const query = req.scope.resolve("query") as any
+
   if (isPrismProvider(paymentProviderId)) {
     const instrumentFailure = checkPrismInstrument(instrument)
     if (instrumentFailure) {
       reject(instrumentFailure)
       return
     }
-  }
 
-  const query = req.scope.resolve("query") as any
-  const { data: [cartForValidation] } = await query.graph({
-    entity: "cart",
-    fields: ["id", "metadata"],
-    filters: { id },
-  })
-  const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, signedSummary)
-  if (bindingFailure) {
-    reject(bindingFailure)
-    return
+    const { data: [cartForValidation] } = await query.graph({
+      entity: "cart",
+      fields: ["id", "metadata"],
+      filters: { id },
+    })
+    const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, signedSummary)
+    if (bindingFailure) {
+      reject(bindingFailure)
+      return
+    }
   }
 
   try {

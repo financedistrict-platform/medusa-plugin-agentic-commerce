@@ -29,6 +29,7 @@ vi.mock("@medusajs/framework/workflows-sdk", async (importOriginal) => ({
 }))
 
 import { POST as ucpComplete } from "../api/ucp/checkout-sessions/[id]/complete/route"
+import { POST as acpComplete } from "../api/acp/checkout_sessions/[id]/complete/route"
 import { setupPaymentStep } from "../workflows/steps/setup-payment"
 import { paymentToCapture } from "../lib/payment-to-capture"
 import AgenticCommerceService from "../modules/agentic-commerce/service"
@@ -41,6 +42,13 @@ const quotedMetadata = {
   prism_checkout_data: {
     preparedAmount: String(QUOTED_TOTAL),
     preparedCurrency: "usd",
+    acp: {
+      id: HANDLER_ID,
+      config: {
+        x402Version: 2,
+        accepts: [{ network: "eip155:84532", asset: "0xasset", amount: QUOTED_AMOUNT, payTo: "0xmerchant" }],
+      },
+    },
     ucp: {
       [HANDLER_ID]: [{
         id: HANDLER_ID,
@@ -67,10 +75,13 @@ function base64Credential(value: string) {
   return Buffer.from(JSON.stringify({ x402Version: 2, paymentPayload: signedPayload(value) })).toString("base64")
 }
 
-function setup(credential: Record<string, unknown>) {
+function setup(
+  credential: Record<string, unknown>,
+  { metadata = quotedMetadata as Record<string, unknown>, providerId = "pp_prism_prism" } = {},
+) {
   const { service } = createStoreService({ version: "2026-04-08" })
-  ;(service as any).getPaymentProviderId = () => "pp_prism_prism"
-  const cart = { id: "cart_1", items: [], metadata: quotedMetadata }
+  ;(service as any).getPaymentProviderId = () => providerId
+  const cart = { id: "cart_1", items: [], metadata }
   const query = { graph: vi.fn(async () => ({ data: [cart], metadata: {} })) }
   completeRun.mockClear()
   const req = {
@@ -184,6 +195,103 @@ describe("UCP complete tamper cases", () => {
     expect(completeRun).toHaveBeenCalledTimes(1)
     expect(settledSummary()).toMatchObject({ value: QUOTED_AMOUNT })
     expect(settledAuthorization()).toBe(authorization)
+  })
+})
+
+describe("UCP complete without a usable payment quote", () => {
+  const authorization = base64Credential(QUOTED_AMOUNT)
+
+  it.each([
+    ["a cart that never got a quote", {}],
+    ["a cart whose quote was cleared", { prism_checkout_data: null }],
+    ["a quote holding no UCP accepts", { prism_checkout_data: { preparedAmount: "15", preparedCurrency: "usd", ucp: null } }],
+  ])("rejects %s", async (_label, metadata) => {
+    const { req, res } = setup({ type: "x402", authorization }, { metadata })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("rejects an unreadable credential on a cart that never got a quote", async () => {
+    const { req, res } = setup({ type: "x402", authorization: "abc" }, { metadata: {} })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("does not ask a provider without a Prism quote for one", async () => {
+    const { req, res } = setup({ type: "x402", authorization }, { metadata: {}, providerId: "pp_stripe_stripe" })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("ACP complete tamper cases", () => {
+  const authorization = base64Credential(QUOTED_AMOUNT)
+
+  function acpSetup(
+    credentialAuthorization: string,
+    options: { metadata?: Record<string, unknown>; providerId?: string } = {},
+  ) {
+    const { req, res } = setup({}, options)
+    req.validatedBody = {
+      payment_data: { handler_id: HANDLER_ID, instrument: { credential: { authorization: credentialAuthorization } } },
+    }
+    return { req, res }
+  }
+
+  it.each([
+    ["a cart that never got a quote", {}],
+    ["a cart whose quote was cleared", { prism_checkout_data: null }],
+    ["a quote holding no ACP accepts", { prism_checkout_data: { preparedAmount: "15", preparedCurrency: "usd", acp: null } }],
+  ])("rejects %s", async (_label, metadata) => {
+    const { req, res } = acpSetup(authorization, { metadata })
+
+    await acpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("rejects a credential whose payment summary cannot be read", async () => {
+    const { req, res } = acpSetup("abc")
+
+    await acpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("rejects an authorization signed below the quote", async () => {
+    const { req, res } = acpSetup(base64Credential("1"))
+
+    await acpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("settles the authorization the amount check approved", async () => {
+    const { req, res } = acpSetup(authorization)
+
+    await acpComplete(req, res)
+
+    expect(completeRun).toHaveBeenCalledTimes(1)
+    expect(settledAuthorization()).toBe(authorization)
+  })
+
+  it("does not ask a provider without a Prism quote for one", async () => {
+    const { req, res } = acpSetup("abc", { metadata: {}, providerId: "pp_stripe_stripe" })
+
+    await acpComplete(req, res)
+
+    expect(completeRun).toHaveBeenCalledTimes(1)
   })
 })
 
