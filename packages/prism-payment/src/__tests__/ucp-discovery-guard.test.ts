@@ -291,7 +291,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
     vi.restoreAllMocks()
   })
 
-  it("clears the stored quote when a re-prepare fails", async () => {
+  it("returns no quote when a re-prepare fails so the stale one is replaced", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined)
     const updateCarts = vi.fn().mockResolvedValue(undefined)
     const adapter = adapterWith({
@@ -301,7 +301,8 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
     const stale = { ucp: null, acp: null, preparedAmount: "4", preparedResourceUrl: "https://store.test/ucp/checkout-sessions/c1" }
 
     const result = await adapter.prepareCheckoutPayment({
-      cart: { id: "c1", total: 5, currency_code: "usd", metadata: { other: 1, prism_checkout_data: stale } },
+      cart: { id: "c1", total: 5, currency_code: "usd", metadata: { other: 1 } },
+      stored: stale,
       checkoutBaseUrl: "https://store.test/ucp/checkout-sessions",
       storeName: "Test",
       ucpVersion: "2026-01-23",
@@ -309,7 +310,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
     } as any)
 
     expect(result).toBeNull()
-    expect(updateCarts).toHaveBeenCalledWith("c1", { metadata: { other: 1, prism_checkout_data: null } })
+    expect(updateCarts).not.toHaveBeenCalled()
     vi.restoreAllMocks()
   })
 
@@ -321,7 +322,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
 
     const result = await prepareFor(adapter)
 
-    expect(adapter.extractPaymentConfig({ prism_checkout_data: result })).toEqual(rawConfig)
+    expect(adapter.extractPaymentConfig(result)).toEqual(rawConfig)
   })
 
   it("asks Prism for ACP handlers without a version and caches the result", async () => {

@@ -61,27 +61,27 @@ export interface PaymentHandlerAdapter {
    * Called when a checkout session is created or updated (total changes).
    * The adapter should:
    * 1. Call its payment gateway to get payment requirements
-   * 2. Store the result on cart metadata under a key it owns
-   * 3. Return the result (or null on failure)
+   * 2. Return the result (or null on failure); the plugin stores it in its
+   *    own session table and hands it back as `input.stored`
    *
    * The adapter is responsible for idempotency — skip the API call
-   * if already prepared for the same cart total.
+   * if `input.stored` is still valid for the same cart total.
    */
   prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<unknown | null>
 
   /**
    * Return UCP payment_handlers block for a checkout session response.
-   * Reads its own stored data from cart metadata.
+   * Reads the data it returned from prepareCheckoutPayment.
    * Return empty object if no data available.
    */
-  getUcpCheckoutHandlers(cartMetadata?: Record<string, unknown>): Record<string, unknown[]>
+  getUcpCheckoutHandlers(stored?: unknown): Record<string, unknown[]>
 
   /**
    * Return ACP payment handlers array for a checkout session response.
-   * Reads its own stored data from cart metadata.
+   * Reads the data it returned from prepareCheckoutPayment.
    * Return empty array if no data available.
    */
-  getAcpCheckoutHandlers(cartMetadata?: Record<string, unknown>): unknown[]
+  getAcpCheckoutHandlers(stored?: unknown): unknown[]
 }
 
 // =====================================================
@@ -96,11 +96,13 @@ export type CheckoutPrepareInput = {
     currency_code?: string
     metadata?: Record<string, unknown>
   }
+  /** What this adapter returned from its last prepareCheckoutPayment for this cart, as stored by the plugin */
+  stored?: unknown
   /** Base URL for checkout session resources (e.g., "https://store.example.com/ucp/checkout-sessions") */
   checkoutBaseUrl: string
   /** Human-readable store name for payment descriptions */
   storeName: string
   ucpVersion: string
-  /** Medusa DI container for resolving services (e.g., cart module for metadata updates) */
+  /** Medusa DI container for resolving services */
   container: any
 }

@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-session"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
+import { fetchSessionCart } from "../../../lib/agent-session"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
 import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
@@ -36,12 +36,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     })
 
     // Fetch full cart for formatting
-    const query = req.scope.resolve("query") as any
-    const { data: [fullCart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id: cart.id },
-    })
+    const fullCart = await fetchSessionCart(req.scope, cart.id)
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/carts`

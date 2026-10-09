@@ -25,18 +25,16 @@ const credential = {
 
 const instrument = { id: "inst_1", handler_id: HANDLER_ID, type: "x402", credential }
 
-const quotedMetadata = {
-  prism_checkout_data: {
-    ucp: {
-      [HANDLER_ID]: [{
-        id: HANDLER_ID,
-        version: "2026-10-07",
-        config: {
-          x402Version: 2,
-          accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }],
-        },
-      }],
-    },
+const storedQuote = {
+  ucp: {
+    [HANDLER_ID]: [{
+      id: HANDLER_ID,
+      version: "2026-10-07",
+      config: {
+        x402Version: 2,
+        accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }],
+      },
+    }],
   },
 }
 
@@ -64,15 +62,15 @@ describe("checkPrismInstrument", () => {
 
 describe("checkQuoteBinding", () => {
   it("passes when the signed payment matches the stored quote", () => {
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(credential)))).toBeNull()
+    expect(checkQuoteBinding(storedQuote, HANDLER_ID, extractSignedSummary(toBase64(credential)))).toBeNull()
   })
 
   it.each([
-    ["empty metadata", {}],
-    ["missing metadata", undefined],
-    ["a cleared quote", { prism_checkout_data: null }],
-  ])("rejects a cart with %s instead of skipping the check", (_label, metadata) => {
-    expect(checkQuoteBinding(metadata, HANDLER_ID, extractSignedSummary(toBase64(credential))))
+    ["an empty quote", {}],
+    ["no stored quote", undefined],
+    ["a cleared quote", null],
+  ])("rejects a cart with %s instead of skipping the check", (_label, quote) => {
+    expect(checkQuoteBinding(quote, HANDLER_ID, extractSignedSummary(toBase64(credential))))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
@@ -81,24 +79,24 @@ describe("checkQuoteBinding", () => {
   })
 
   it("reads the ACP quote for the acp protocol", () => {
-    const acpQuoted = { prism_checkout_data: { acp: { config: quotedMetadata.prism_checkout_data.ucp[HANDLER_ID][0].config } } }
+    const acpQuoted = { acp: { config: storedQuote.ucp[HANDLER_ID][0].config } }
     expect(checkQuoteBinding(acpQuoted, HANDLER_ID, extractSignedSummary(toBase64(credential)), "acp")).toBeNull()
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(credential)), "acp"))
+    expect(checkQuoteBinding(storedQuote, HANDLER_ID, extractSignedSummary(toBase64(credential)), "acp"))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but the handler_id finds no stored accepts", () => {
-    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", extractSignedSummary(toBase64(credential))))
+    expect(checkQuoteBinding(storedQuote, "com.other.pay", extractSignedSummary(toBase64(credential))))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but holds no UCP accepts", () => {
-    expect(checkQuoteBinding({ prism_checkout_data: { ucp: null } }, HANDLER_ID, extractSignedSummary(toBase64(credential))))
+    expect(checkQuoteBinding({ ucp: null }, HANDLER_ID, extractSignedSummary(toBase64(credential))))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but the credential cannot be read", () => {
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64({ type: "x402" }))))
+    expect(checkQuoteBinding(storedQuote, HANDLER_ID, extractSignedSummary(toBase64({ type: "x402" }))))
       .toMatchObject({ status: 422, code: "invalid_credential" })
   })
 
@@ -110,7 +108,7 @@ describe("checkQuoteBinding", () => {
         payload: { authorization: { value: "1", to: "0xMerchant" } },
       },
     }
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(tampered))))
+    expect(checkQuoteBinding(storedQuote, HANDLER_ID, extractSignedSummary(toBase64(tampered))))
       .toMatchObject({ status: 422, code: "amount_mismatch" })
   })
 })

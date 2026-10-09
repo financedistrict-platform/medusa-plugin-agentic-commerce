@@ -1,8 +1,8 @@
 /**
  * Session ownership utilities.
  *
- * Generates a fingerprint from the caller's identity and stores it in cart
- * metadata at session creation. Subsequent operations verify the fingerprint
+ * Generates a fingerprint from the caller's identity and stores it in the
+ * plugin-owned agent session at session creation. Subsequent operations verify the fingerprint
  * matches, preventing one agent from modifying another's checkout session.
  *
  * For ACP: fingerprint = SHA-256(API key from Authorization header)
@@ -14,6 +14,7 @@
  */
 
 import crypto from "crypto"
+import type { AgentSessionRecord } from "./agent-session"
 
 export function computeSessionFingerprint(req: {
   headers: Record<string, string | string[] | undefined>
@@ -35,12 +36,8 @@ export function computeSessionFingerprint(req: {
 }
 
 export function verifySessionOwnership(
-  cartMetadata: Record<string, unknown> | undefined,
+  session: Pick<AgentSessionRecord, "session_fingerprint"> | null | undefined,
   fingerprint: string
 ): boolean {
-  if (!cartMetadata?.session_fingerprint) {
-    // Legacy sessions without fingerprint — allow (backwards compat)
-    return true
-  }
-  return cartMetadata.session_fingerprint === fingerprint
+  return !!session?.session_fingerprint && session.session_fingerprint === fingerprint
 }

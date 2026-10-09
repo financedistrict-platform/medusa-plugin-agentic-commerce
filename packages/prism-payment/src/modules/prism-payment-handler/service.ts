@@ -56,7 +56,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   }
 
   async prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<PrismCheckoutData | null> {
-    const { cart, checkoutBaseUrl, storeName, ucpVersion, container } = input
+    const { cart, checkoutBaseUrl, storeName, ucpVersion } = input
 
     const totalMajor = cart.total ?? cart.raw_total?.value ?? 0
     const currency = (cart.currency_code || "eur").toUpperCase()
@@ -64,7 +64,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     const amount = String(Number(totalMajor))
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
-    const existing = cart.metadata?.[PRISM_CHECKOUT_DATA_KEY] as PrismCheckoutData | undefined
+    const existing = input.stored as PrismCheckoutData | undefined
     if (
       existing &&
       existing.preparedResourceUrl === resourceUrl &&
@@ -90,7 +90,6 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
 
     if (!ucpDeclaration && !acpDeclaration) {
       console.error(`[prism-payment-handler] No UCP or ACP declaration available for cart ${cart.id}`)
-      await this.clearStoredQuote(cart, container)
       return null
     }
 
@@ -99,7 +98,6 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       config = await this.client.preparePayment(prepareInput)
     } catch (error: unknown) {
       console.error(`[prism-payment-handler] Prepare failed for cart ${cart.id}: ${error}`)
-      await this.clearStoredQuote(cart, container)
       return null
     }
 
@@ -119,52 +117,20 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     if (!quoteSignature) {
       console.error(`[prism-payment-handler] Prism quote for cart ${cart.id} could not be signed; checkout will be rejected`)
     }
-    const data: PrismCheckoutData = quoteSignature ? { ...terms, quoteSignature } : terms
-
-    try {
-      const cartModuleService = container.resolve("cart") as any
-      await cartModuleService.updateCarts(cart.id, {
-        metadata: {
-          ...(cart.metadata || {}),
-          [PRISM_CHECKOUT_DATA_KEY]: data,
-        },
-      })
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      console.error(`[prism-payment-handler] Failed to store config on cart ${cart.id}: ${message}`)
-    }
-
-    return data
+    return quoteSignature ? { ...terms, quoteSignature } : terms
   }
 
-  getUcpCheckoutHandlers(cartMetadata?: Record<string, unknown>): Record<string, unknown[]> {
-    const data = cartMetadata?.[PRISM_CHECKOUT_DATA_KEY] as PrismCheckoutData | undefined
-    return data?.ucp ?? {}
+  getUcpCheckoutHandlers(stored?: unknown): Record<string, unknown[]> {
+    return (stored as PrismCheckoutData | undefined)?.ucp ?? {}
   }
 
-  getAcpCheckoutHandlers(cartMetadata?: Record<string, unknown>): unknown[] {
-    const data = cartMetadata?.[PRISM_CHECKOUT_DATA_KEY] as PrismCheckoutData | undefined
+  getAcpCheckoutHandlers(stored?: unknown): unknown[] {
+    const data = stored as PrismCheckoutData | undefined
     return data?.acp ? [data.acp] : []
   }
 
-  extractPaymentConfig(cartMetadata?: Record<string, unknown>): PaymentHandlerConfig | null {
-    return paymentConfigFromCheckoutData(cartMetadata?.[PRISM_CHECKOUT_DATA_KEY])
-  }
-
-  private async clearStoredQuote(
-    cart: CheckoutPrepareInput["cart"],
-    container: CheckoutPrepareInput["container"],
-  ): Promise<void> {
-    if (!cart.metadata?.[PRISM_CHECKOUT_DATA_KEY]) return
-    try {
-      const cartModuleService = container.resolve("cart") as any
-      await cartModuleService.updateCarts(cart.id, {
-        metadata: { ...cart.metadata, [PRISM_CHECKOUT_DATA_KEY]: null },
-      })
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      console.error(`[prism-payment-handler] Failed to clear stale quote on cart ${cart.id}: ${message}`)
-    }
+  extractPaymentConfig(stored?: unknown): PaymentHandlerConfig | null {
+    return paymentConfigFromCheckoutData(stored)
   }
 
   private async fetchUcpDiscovery(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {

@@ -6,6 +6,7 @@
  */
 
 import { medusaToAcpAddress } from "../address-translator"
+import { handlerDataOf, requireLoadedSession } from "../agent-session"
 import { resolveAcpStatus, resolveMissingRequirements, type AcpStatus } from "../status-maps"
 import type { FormatterContext } from "./types"
 import { toMinor } from "./types"
@@ -206,6 +207,7 @@ function formatTotals(cart: any) {
 //   fulfillment_options, totals, messages, links
 
 export function formatAcpCheckoutSession(ctx: FormatterContext, cart: any, baseUrl: string) {
+  requireLoadedSession(cart)
   const currency = (cart.currency_code || "eur").toUpperCase()
   const status = resolveAcpStatus(cart)
 
@@ -252,7 +254,7 @@ export function formatAcpCheckoutSession(ctx: FormatterContext, cart: any, baseU
     protocol: { version: ctx.acpVersion },
     capabilities: {
       payment: {
-        handlers: ctx.paymentHandlers.getAcpCheckoutHandlers(cart.metadata),
+        handlers: ctx.paymentHandlers.getAcpCheckoutHandlers(handlerDataOf(cart.agent_session)),
       },
     },
     status,

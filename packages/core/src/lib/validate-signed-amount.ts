@@ -67,24 +67,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // =====================================================
-// Cart-metadata reader
+// Stored-quote reader
 // =====================================================
 
 /**
  * Read the cart's stored Prism accepts[] for the given handler and
  * protocol. Returns null if the cart wasn't prepared for Prism.
- * The `prism_checkout_data` metadata key is set by the prism-payment
- * handler at prepare time.
+ * The stored quote is what the prism-payment handler returned at
+ * prepare time, kept in the plugin's agent session.
  */
 export function readStoredPrismAccepts(
-  cartMetadata: unknown,
+  storedQuote: unknown,
   handlerId: string | undefined,
   protocol: "ucp" | "acp",
 ): StoredAcceptEntry[] | null {
-  if (typeof cartMetadata !== "object" || cartMetadata === null) return null
-  const data = (cartMetadata as Record<string, unknown>).prism_checkout_data
-  if (typeof data !== "object" || data === null) return null
-  const d = data as Record<string, unknown>
+  if (typeof storedQuote !== "object" || storedQuote === null) return null
+  const d = storedQuote as Record<string, unknown>
 
   if (protocol === "ucp") {
     if (!handlerId) return null

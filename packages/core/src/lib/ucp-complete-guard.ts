@@ -54,7 +54,7 @@ export function checkPrismInstrument(instrument: InstrumentInput): GuardFailure 
 }
 
 export function checkQuoteBinding(
-  cartMetadata: unknown,
+  storedQuote: unknown,
   handlerId: string | undefined,
   signedSummary: SignedPaymentSummary | null,
   protocol: "ucp" | "acp" = "ucp",
@@ -69,7 +69,7 @@ export function checkQuoteBinding(
 
   const validation = validateSignedAgainstStored(
     signedSummary,
-    readStoredPrismAccepts(cartMetadata, protocol === "ucp" ? normalizePrismHandlerId(handlerId) : handlerId, protocol),
+    readStoredPrismAccepts(storedQuote, protocol === "ucp" ? normalizePrismHandlerId(handlerId) : handlerId, protocol),
   )
   return validation.ok
     ? null

@@ -37,7 +37,7 @@ const originalBody = {
   },
 }
 
-const originalMetadata = JSON.parse(readFixture("inputs", "checkout-session.json")).cart.metadata
+const originalQuote = JSON.parse(readFixture("inputs", "checkout-session.json")).cart.agent_session.handler_data["xyz.fd.prism_payment"]
 
 describe("an agent built against 0.1.12", () => {
   it("is served 2026-04-08 when UCP-Agent carries no profile", async () => {
@@ -64,7 +64,7 @@ describe("an agent built against 0.1.12", () => {
     expect(extracted).toMatchObject({ handlerId: "xyz.fd.prism_payment", instrumentType: "tokenized" })
     expect(isPrismProvider("pp_prism_prism")).toBe(true)
     expect(checkPrismInstrument(parsed.data!.payment!.instruments[0])).toBeNull()
-    expect(checkQuoteBinding(originalMetadata, extracted.handlerId, extracted.signedSummary)).toBeNull()
+    expect(checkQuoteBinding(originalQuote, extracted.handlerId, extracted.signedSummary)).toBeNull()
   })
 
   it("completes an instrument without handler_id and reports prism_default as 0.1.12 did", () => {
@@ -75,7 +75,7 @@ describe("an agent built against 0.1.12", () => {
     if (!extraction.ok) throw new Error(extraction.code)
     const extracted = extraction.payment
     expect(checkPrismInstrument(parsed.data!.payment!.instruments[0])).toBeNull()
-    expect(checkQuoteBinding(originalMetadata, extracted.handlerId, extracted.signedSummary)).toBeNull()
+    expect(checkQuoteBinding(originalQuote, extracted.handlerId, extracted.signedSummary)).toBeNull()
     expect(ucpWireFor(originalRequest({})).completedPaymentHandlerId(extracted.handlerId)).toBe("prism_default")
   })
 
