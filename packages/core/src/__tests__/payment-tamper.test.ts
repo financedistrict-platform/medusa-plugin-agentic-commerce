@@ -32,6 +32,8 @@ vi.mock("@medusajs/framework/workflows-sdk", async (importOriginal) => ({
 import { POST as ucpComplete } from "../api/ucp/checkout-sessions/[id]/complete/route"
 import { POST as acpComplete } from "../api/acp/checkout_sessions/[id]/complete/route"
 import { setupPaymentStep } from "../workflows/steps/setup-payment"
+import { reservePaymentAuthorizationStep } from "../workflows/steps/reserve-payment-authorization"
+import { fakePaymentLedger } from "./helpers/payment-ledger-store"
 import { paymentToCapture } from "../lib/payment-to-capture"
 import AgenticCommerceService from "../modules/agentic-commerce/service"
 
@@ -74,7 +76,7 @@ function signedPayload(value: string) {
     accepted: { network: "eip155:84532", asset: "0xAsset", amount: QUOTED_AMOUNT, payTo: "0xMerchant" },
     payload: {
       signature: "0xsig",
-      authorization: { from: "0xBuyer", to: "0xMerchant", value, validAfter: "0", validBefore: "9999999999", nonce: "0x01" },
+      authorization: { from: "0x2222222222222222222222222222222222222222", to: "0xMerchant", value, validAfter: "0", validBefore: "9999999999", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101" },
     },
   }
 }
@@ -806,5 +808,125 @@ describe("payment provider configured for agentic checkout", () => {
     vi.stubEnv("AGENTIC_PAYMENT_PROVIDER", "pp_prism_prism")
 
     expect(new AgenticCommerceService({}, prismAdapters).getPaymentProviderId()).toBe("pp_prism_prism")
+  })
+})
+
+describe("a signed authorization can be used on one cart only", () => {
+  const PAYER = "0xAbCdEf0123456789abcdef0123456789ABCDEF01"
+  const reserve = reservePaymentAuthorizationStep as unknown as (input: unknown, ctx: unknown) => Promise<unknown>
+
+  function ledgerScope(ledger = fakePaymentLedger()) {
+    return { ledger, container: { resolve: (name: string) => ({ agenticCommerceSession: ledger })[name] } }
+  }
+
+  const attempt = (container: unknown, cartId: string, authorization: string | undefined, providerId = "pp_prism_prism") =>
+    reserve({ cart_id: cartId, payment_provider_id: providerId, payment_data: authorization ? { eip3009_authorization: authorization } : undefined }, { container })
+
+  function credentialWith(change: { from?: string | null; nonce?: string | null; asset?: string }) {
+    const payload = signedPayload(QUOTED_AMOUNT)
+    const authorization: Record<string, unknown> = { ...payload.payload.authorization }
+    if (change.from !== undefined) change.from === null ? delete authorization.from : (authorization.from = change.from)
+    if (change.nonce !== undefined) change.nonce === null ? delete authorization.nonce : (authorization.nonce = change.nonce)
+    const accepted = { ...payload.accepted, ...(change.asset ? { asset: change.asset } : {}) }
+    return Buffer.from(JSON.stringify({ x402Version: 2, paymentPayload: { accepted, payload: { ...payload.payload, authorization } } })).toString("base64")
+  }
+
+  it("lets the first cart use the authorization", async () => {
+    const { container, ledger } = ledgerScope()
+
+    await expect(attempt(container, "cart_1", base64Credential(QUOTED_AMOUNT))).resolves.toBeDefined()
+    expect([...ledger.holders.values()]).toEqual(["cart_1"])
+  })
+
+  it("rejects the same authorization on a second cart with the same total", async () => {
+    const { container } = ledgerScope()
+    const authorization = base64Credential(QUOTED_AMOUNT)
+    await attempt(container, "cart_1", authorization)
+
+    await expect(attempt(container, "cart_2", authorization)).rejects.toMatchObject({
+      type: "conflict",
+      message: expect.stringContaining("already been used"),
+    })
+  })
+
+  it("lets the cart that holds the authorization submit it again", async () => {
+    const { container } = ledgerScope()
+    const authorization = base64Credential(QUOTED_AMOUNT)
+    await attempt(container, "cart_1", authorization)
+
+    await expect(attempt(container, "cart_1", authorization)).resolves.toBeDefined()
+  })
+
+  it("rejects the authorization on another cart when only the letter case of the payer, token or nonce differs", async () => {
+    const { container } = ledgerScope()
+    const signed = { from: PAYER, nonce: `0x${"AB".repeat(32)}`, asset: "0xAsset" }
+    await attempt(container, "cart_1", credentialWith(signed))
+
+    for (const change of [{ from: PAYER.toLowerCase() }, { nonce: `0x${"ab".repeat(32)}` }, { asset: "0xASSET" }]) {
+      await expect(attempt(container, "cart_2", credentialWith({ ...signed, ...change }))).rejects.toMatchObject({ type: "conflict", code: "payment_authorization_used" })
+    }
+  })
+
+  it("lets another nonce, payer or token bind to another cart", async () => {
+    const { container } = ledgerScope()
+    const signed = { from: PAYER, nonce: `0x${"AB".repeat(32)}`, asset: "0xAsset" }
+    await attempt(container, "cart_1", credentialWith(signed))
+
+    for (const change of [{ nonce: `0x${"02".repeat(32)}` }, { from: `0x${"33".repeat(20)}` }, { asset: "0xOtherAsset" }]) {
+      await expect(attempt(container, "cart_2", credentialWith({ ...signed, ...change }))).resolves.toBeDefined()
+    }
+  })
+
+  it.each([
+    ["no payer", { from: null }],
+    ["no nonce", { nonce: null }],
+    ["a payer that is not an address", { from: "0xBuyer" }],
+    ["a payer with surrounding whitespace", { from: ` ${PAYER}` }],
+    ["a nonce that is not 32 bytes", { nonce: "0x01" }],
+    ["a nonce without the 0x prefix", { nonce: "ab".repeat(32) }],
+  ])("rejects a credential with %s before it reaches the provider", async (_label, change) => {
+    const { container, ledger } = ledgerScope()
+
+    await expect(attempt(container, "cart_1", credentialWith(change))).rejects.toMatchObject({ type: "invalid_data" })
+    expect(ledger.holders.size).toBe(0)
+  })
+
+  it.each([
+    ["an unreadable credential", "abc"],
+    ["no credential", undefined],
+  ])("rejects %s on a Prism cart", async (_label, authorization) => {
+    const { container, ledger } = ledgerScope()
+
+    await expect(attempt(container, "cart_1", authorization)).rejects.toMatchObject({ type: "invalid_data" })
+    expect(ledger.holders.size).toBe(0)
+  })
+
+  it("leaves other providers alone", async () => {
+    const { container, ledger } = ledgerScope()
+
+    await expect(attempt(container, "cart_1", "abc", "pp_stripe_stripe")).resolves.toBeDefined()
+    expect(ledger.holders.size).toBe(0)
+  })
+
+  it("fails when the payment ledger module is not registered", async () => {
+    await expect(attempt({ resolve: () => undefined }, "cart_1", base64Credential(QUOTED_AMOUNT))).rejects.toThrow("agenticCommerceSession")
+  })
+
+  it("exposes the payer and nonce of the signed authorization", () => {
+    expect(extractSignedSummary(base64Credential(QUOTED_AMOUNT))).toMatchObject({ payer: "0x2222222222222222222222222222222222222222", nonce: `0x${"01".repeat(32)}` })
+  })
+
+  it.each([
+    ["on the UCP route", (req: any, res: any) => ucpComplete(req, res)],
+    ["on the ACP route", (req: any, res: any) => { req.validatedBody = { payment_data: { handler_id: HANDLER_ID, instrument: { credential: { authorization: base64Credential(QUOTED_AMOUNT) } } } }; return acpComplete(req, res) }],
+  ])("answers a reused authorization with a rejection %s", async (_label, route) => {
+    const { req, res } = setup({ type: "x402", authorization: base64Credential(QUOTED_AMOUNT) })
+    completeRun.mockRejectedValueOnce(Object.assign(new Error("The payment authorization has already been used"), { type: "conflict", code: "payment_authorization_used" }))
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    await route(req, res)
+
+    expect(res.statusCode).toBe(409)
+    expect(JSON.stringify(res.body)).toContain("payment_authorization_used")
   })
 })

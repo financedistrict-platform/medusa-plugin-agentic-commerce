@@ -15,6 +15,7 @@ import { validateCheckoutPrerequisitesStep } from "./steps/validate-checkout-pre
 import { ensureShippingMethodStep } from "./steps/ensure-shipping-method"
 import { ensurePaymentCollectionStep } from "./steps/ensure-payment-collection"
 import { setupPaymentStep } from "./steps/setup-payment"
+import { reservePaymentAuthorizationStep } from "./steps/reserve-payment-authorization"
 import { paymentToCapture } from "../lib/payment-to-capture"
 
 type CompleteCheckoutSessionInput = {
@@ -70,6 +71,8 @@ const completeCheckoutSessionWorkflow = createWorkflow(
           : undefined,
       }
     })
+
+    reservePaymentAuthorizationStep(paymentData)
 
     setupPaymentStep(paymentData)
 

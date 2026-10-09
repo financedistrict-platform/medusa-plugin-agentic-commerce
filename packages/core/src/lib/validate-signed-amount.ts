@@ -17,6 +17,10 @@ export type SignedPaymentSummary = {
   value: string
   /** EIP-3009 signed recipient (`authorization.to`) — case-insensitive */
   to: string
+  /** EIP-3009 signed payer (`authorization.from`) — case-insensitive */
+  payer: string
+  /** EIP-3009 signed nonce (`authorization.nonce`) — case-insensitive */
+  nonce: string
   /** Amount named by the declared requirements (`accepted.amount`) */
   declaredAmount: string
   /** Recipient named by the declared requirements (`accepted.payTo`) — case-insensitive */
@@ -52,14 +56,19 @@ export function extractSignedSummary(authorizationB64: string): SignedPaymentSum
   const asset = readNonEmptyString(accepted, "asset")
   const value = readNonEmptyString(authz, "value")
   const to = readNonEmptyString(authz, "to")
+  const payer = readNonEmptyString(authz, "from")
+  const nonce = readNonEmptyString(authz, "nonce")
   const declaredAmount = readNonEmptyString(accepted, "amount")
   const declaredPayTo = readNonEmptyString(accepted, "payTo")
 
-  if (!network || !asset || !value || !to || !declaredAmount || !declaredPayTo || !ATOMIC_UNITS.test(value)) return null
-  return { network, asset, value, to, declaredAmount, declaredPayTo }
+  if (!network || !asset || !value || !to || !payer || !nonce || !declaredAmount || !declaredPayTo || !ATOMIC_UNITS.test(value)) return null
+  if (!EVM_ADDRESS.test(payer) || !BYTES32_HEX.test(nonce)) return null
+  return { network, asset, value, to, payer, nonce, declaredAmount, declaredPayTo }
 }
 
 const ATOMIC_UNITS = /^[0-9]+$/
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const BYTES32_HEX = /^0x[0-9a-fA-F]{64}$/
 
 function decodeBase64Json(b64: string): unknown {
   try {

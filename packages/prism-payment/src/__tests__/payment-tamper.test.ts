@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
+import { PrismClient } from "../lib/prism-client"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import {
   ASSET,
@@ -564,6 +565,196 @@ describe("Prism quote produced by the handler", () => {
     expect(adapter.getUcpCheckoutHandlers(checkoutData)).toEqual(checkoutData.ucp)
     expect(adapter.getAcpCheckoutHandlers(undefined)).toEqual([])
     expect(adapter.getUcpCheckoutHandlers({ prism_checkout_data: checkoutData } as any)).toEqual({})
+  })
+})
+
+describe("Prism verification outcome", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("does not settle or authorize when the verification call fails", async () => {
+    ;({ provider, client } = makeProvider())
+    client.verifyPayment.mockRejectedValue(new Error("Prism POST /api/v2/payment/verify failed: 503"))
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("prism_verification_error: Prism POST /api/v2/payment/verify failed: 503")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("does not store an authorization for a later capture when the verification call fails", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    client.verifyPayment.mockRejectedValue(new Error("timeout"))
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+    expect(result.status).toBe("error")
+    expect(result.data).not.toHaveProperty("verified")
+    expect(result.data).not.toHaveProperty("x402_authorization")
+    expect((await provider.getPaymentStatus({ data: result.data } as any)).status).toBe("error")
+  })
+
+  it("marks a stored authorization verified only when Prism verified it", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    const verified = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+    ;({ provider, client } = makeProvider({ auto_capture: false, verify_before_settle: false }))
+    const unverified = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+    expect(verified.data).toMatchObject({ verified: true })
+    expect(unverified.status).toBe("authorized")
+    expect(unverified.data).not.toHaveProperty("verified")
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+  })
+
+  it("rejects a verification reply that does not say the payment is valid", async () => {
+    ;({ provider, client } = makeProvider())
+    client.verifyPayment.mockResolvedValue({})
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+    expect(result.status).toBe("error")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+})
+
+describe("Prism x402 version", () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ isValid: true }) })
+    vi.stubGlobal("fetch", fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const request = (x402Version: unknown) => ({ x402Version, paymentPayload: {}, paymentRequirements: {} }) as any
+
+  it.each([[1], [2]])("reaches the Prism v%s endpoint", async (version) => {
+    const prism = new PrismClient({ apiUrl: "https://gw.test", apiKey: "key" })
+
+    await prism.verifyPayment(request(version))
+    await prism.settlePayment(request(version))
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `https://gw.test/api/v${version}/payment/verify`,
+      `https://gw.test/api/v${version}/payment/settle`,
+    ])
+  })
+
+  it.each([
+    ["a path segment", "2/../../admin"],
+    ["a query string", "2?x=1"],
+    ["a version Prism does not serve", 3],
+    ["zero", 0],
+    ["a negative number", -1],
+    ["a fraction", 2.5],
+    ["a numeric string", "2"],
+    ["nothing", undefined],
+  ])("does not call Prism with %s as the version", async (_label, version) => {
+    const prism = new PrismClient({ apiUrl: "https://gw.test", apiKey: "key" })
+
+    await expect(prism.verifyPayment(request(version))).rejects.toThrow("Unsupported x402 version")
+    await expect(prism.settlePayment(request(version))).rejects.toThrow("Unsupported x402 version")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("rejects a stored quote that carries a version Prism does not serve", async () => {
+    const { provider, client } = makeProvider()
+    const unsigned = unsignedCheckoutData()
+    ;(unsigned.ucp["xyz.fd.prism_payment"][0].config as { x402Version: number }).x402Version = 99
+    const quote = { ...unsigned, quoteSignature: quoteSignatureFor(unsigned, QUOTE_SIGNING_KEY) }
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential(), CART_TOTAL, quote) } as any)
+
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+  })
+
+  it("sends the quoted version to Prism whatever version the buyer's credential names", async () => {
+    const { provider, client } = makeProvider()
+    const cred = credential()
+    cred.x402Version = "../../admin" as never
+    ;(cred.paymentPayload as Record<string, unknown>).x402Version = 1
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, cred) } as any)
+
+    expect(result.status).toBe("authorized")
+    expect(client.verifyPayment.mock.calls[0][0].x402Version).toBe(2)
+    expect(client.settlePayment.mock.calls[0][0].x402Version).toBe(2)
+  })
+})
+
+describe("Prism quote identity", () => {
+  const preparedConfig = { x402Version: 2, resource: { url: "x" }, accepts: [quotedEntry] }
+  const discovery = {
+    "xyz.fd.prism_payment": [{
+      id: "xyz.fd.prism_payment",
+      version: "2026-04-08",
+      spec: "https://gw.test/ucp/prism.md",
+      schema: "https://gw.test/ucp/schema.json",
+      config: {},
+    }],
+  }
+
+  async function quoteFor(cartId: string) {
+    const adapter = new PrismPaymentHandlerAdapter({}, { api_url: "https://gw.test", api_key: QUOTE_SIGNING_KEY })
+    ;(adapter as any).client = {
+      getApiUrl: () => "https://gw.test",
+      getApiKey: () => QUOTE_SIGNING_KEY,
+      fetchUcpHandlers: vi.fn().mockResolvedValue(discovery),
+      fetchAcpHandlers: vi.fn().mockResolvedValue([]),
+      preparePayment: vi.fn().mockResolvedValue(preparedConfig),
+    }
+    return JSON.parse(JSON.stringify(await adapter.prepareCheckoutPayment({
+      cart: { id: cartId, total: CART_TOTAL, currency_code: "usd", metadata: {} },
+      checkoutBaseUrl: "https://shop.test/ucp/checkout-sessions",
+      storeName: "Shop",
+      ucpVersion: "2026-04-08",
+      container: { resolve: () => ({}) },
+    } as any)))
+  }
+
+  it("signs a different quote for two carts with the same total", async () => {
+    const first = await quoteFor("cart_1")
+    const second = await quoteFor("cart_2")
+
+    expect(first.preparedAmount).toBe(second.preparedAmount)
+    expect(first.quoteSignature).not.toBe(second.quoteSignature)
+  })
+
+  it("rejects a quote that was moved to another cart's resource after it was signed", async () => {
+    const { provider, client } = makeProvider()
+    const first = await quoteFor("cart_1")
+    const moved = { ...first, preparedResourceUrl: "https://shop.test/ucp/checkout-sessions/cart_2" }
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential(), CART_TOTAL, moved) } as any)
+
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("invalid_quote_signature")
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+  })
+
+  it("rejects a quote signed without saying which resource it was prepared for", async () => {
+    const { provider } = makeProvider()
+    const { preparedResourceUrl: _dropped, ...withoutResource } = unsignedCheckoutData() as Record<string, unknown>
+    const signed = { ...withoutResource, quoteSignature: quoteSignatureFor(withoutResource as never, QUOTE_SIGNING_KEY) }
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential(), CART_TOTAL, signed) } as any)
+
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
   })
 })
 

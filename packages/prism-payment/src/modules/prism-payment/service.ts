@@ -29,7 +29,7 @@ import type {
   SettledPayment,
 } from "./types"
 import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
-import { PrismClient } from "../../lib/prism-client"
+import { PrismClient, resolvePrismApiKey } from "../../lib/prism-client"
 import { PRISM_CHECKOUT_DATA_KEY } from "../prism-payment-handler/service"
 import {
   asStoredQuote,
@@ -83,8 +83,8 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
   static validateOptions(options: Record<string, unknown>) {
     if (!options.api_url) throw new Error("Prism payment provider requires api_url")
-    if (!options.api_key) {
-      console.warn("[prism-payment] No PRISM_API_KEY configured — Prism payment provider will run in passthrough mode")
+    if (!resolvePrismApiKey(options.api_key)) {
+      throw new Error("Prism payment provider requires api_key or the PRISM_API_KEY environment variable; without it every Prism payment is rejected")
     }
   }
 
@@ -203,6 +203,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Unknown error"
         console.error("[prism-payment] Prism verification failed:", message)
+        return {
+          data: { ...data, error: `prism_verification_error: ${message}` },
+          status: "error" as PaymentSessionStatus,
+        }
       }
     }
 
@@ -250,7 +254,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         network,
         payer: eip3009.from,
         signed_value: eip3009.value,
-        verified: true,
+        ...(this.verifyBeforeSettle ? { verified: true } : {}),
       },
       status: "authorized" as PaymentSessionStatus,
     }

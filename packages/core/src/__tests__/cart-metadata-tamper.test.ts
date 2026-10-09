@@ -61,7 +61,7 @@ function credential(value: string, to: string) {
     accepted: { network: "eip155:84532", asset: "0xAsset", amount: value, payTo: to },
     payload: {
       signature: "0xsig",
-      authorization: { from: "0xBuyer", to, value, validAfter: "0", validBefore: "9999999999", nonce: "0x01" },
+      authorization: { from: "0x2222222222222222222222222222222222222222", to, value, validAfter: "0", validBefore: "9999999999", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101" },
     },
   }
   return Buffer.from(JSON.stringify({ x402Version: 2, paymentPayload: payload })).toString("base64")

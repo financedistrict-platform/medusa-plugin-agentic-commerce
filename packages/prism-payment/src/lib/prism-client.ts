@@ -90,6 +90,12 @@ export type X402AcceptEntry = {
   extra?: Record<string, unknown> | null
 }
 
+const SUPPORTED_X402_VERSIONS: readonly number[] = [1, 2]
+
+export function isSupportedX402Version(version: unknown): version is number {
+  return typeof version === "number" && SUPPORTED_X402_VERSIONS.includes(version)
+}
+
 export type PrismPaymentRequest = {
   x402Version: number
   paymentPayload: unknown
@@ -101,13 +107,18 @@ export type PrismClientOptions = {
   apiKey?: string
 }
 
+export function resolvePrismApiKey(configured?: unknown): string {
+  const fromOptions = typeof configured === "string" ? configured.trim() : ""
+  return fromOptions || (process.env.PRISM_API_KEY ?? "").trim()
+}
+
 export class PrismClient {
   private apiUrl: string
   private apiKey: string
 
   constructor(options: PrismClientOptions = {}) {
     this.apiUrl = options.apiUrl || process.env.PRISM_API_URL || "https://prism-gw.fd.xyz"
-    this.apiKey = options.apiKey || process.env.PRISM_API_KEY || ""
+    this.apiKey = resolvePrismApiKey(options.apiKey)
   }
 
   async fetchUcpHandlers(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
@@ -145,17 +156,18 @@ export class PrismClient {
   }
 
   async verifyPayment(request: PrismPaymentRequest): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
-      `/api/v${request.x402Version}/payment/verify`,
-      request,
-    )
+    return this.post<Record<string, unknown>>(this.paymentPath(request, "verify"), request)
   }
 
   async settlePayment(request: PrismPaymentRequest): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
-      `/api/v${request.x402Version}/payment/settle`,
-      request,
-    )
+    return this.post<Record<string, unknown>>(this.paymentPath(request, "settle"), request)
+  }
+
+  private paymentPath(request: PrismPaymentRequest, action: "verify" | "settle"): string {
+    if (!isSupportedX402Version(request.x402Version)) {
+      throw new Error(`Unsupported x402 version: ${String(request.x402Version)}`)
+    }
+    return `/api/v${request.x402Version}/payment/${action}`
   }
 
   private preparePayload(input: PreparePaymentInput) {

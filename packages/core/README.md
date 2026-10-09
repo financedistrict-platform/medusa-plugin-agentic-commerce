@@ -69,7 +69,9 @@ export default defineConfig({
 })
 ```
 
-Run `npx medusa db:migrate` after installing or upgrading: the agent session module creates the `agent_session` table. Checkout sessions opened before this version have no row and must be recreated by the agent.
+Run `npx medusa db:migrate` after installing or upgrading: the agent session module creates the `agent_session` table and the same module creates the `payment_authorization` table of the payment ledger. Checkout sessions opened before this version have no row and must be recreated by the agent.
+
+A signed payment authorization (token, payer and nonce) can be used on one cart only. The payment ledger records it before the cart is completed, so the same authorization is refused on a second cart (ACP answers `409 payment_authorization_used`) while the cart that holds it can still retry. Checkout completion fails when the agent session module is not registered.
 
 ### 3. Set Environment Variables
 
