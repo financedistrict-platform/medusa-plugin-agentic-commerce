@@ -47,6 +47,12 @@ export function handlerDataOf(session: Pick<AgentSessionRecord, "handler_data"> 
   return session?.handler_data ?? {}
 }
 
+export async function findSessionOfOrder(scope: Resolver, orderId: string): Promise<AgentSessionRecord | null> {
+  const query = scope.resolve("query") as { graph(input: unknown): Promise<{ data: { cart_id?: string | null }[] }> }
+  const { data: [link] } = await query.graph({ entity: "order_cart", fields: ["cart_id"], filters: { order_id: orderId } })
+  return link?.cart_id ? agentSessions(scope).find(link.cart_id) : null
+}
+
 export async function fetchSessionCart(
   scope: Resolver,
   cartId: string,

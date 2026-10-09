@@ -217,7 +217,7 @@ describe("checkout formatting", () => {
 describe("session ownership", () => {
   const agentA = { authorization: "Bearer key-a" }
   const agentB = { authorization: "Bearer key-b" }
-  const fingerprintOf = (headers: Record<string, string>) => computeSessionFingerprint({ headers })
+  const fingerprintOf = (headers: Record<string, string>) => computeSessionFingerprint("acp", headers)
 
   async function ownerCheck(headers: Record<string, string>, row: { session_fingerprint: string } | null, metadata: Record<string, unknown>) {
     const route = findRoute("/acp/checkout_sessions/:id")

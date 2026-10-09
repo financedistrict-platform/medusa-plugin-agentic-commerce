@@ -93,6 +93,7 @@ describe("ACP routes", () => {
   })
 
   it("create forwards the store's current UCP version", async () => {
+    ctx.req.headers = { ...ctx.req.headers, authorization: "Bearer key-a" }
     await acpCreate(ctx.req, ctx.res)
     expect(ctx.prepareCheckoutPayment).toHaveBeenCalledWith(expect.objectContaining({ ucpVersion: CURRENT }))
   })
