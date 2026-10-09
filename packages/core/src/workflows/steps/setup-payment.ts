@@ -1,12 +1,10 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/utils"
 import {
-  createPaymentCollectionForCartWorkflow,
   createPaymentSessionsWorkflow,
   deletePaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
-
-const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
+import { checkoutTotalMismatch, PRISM_CHECKOUT_DATA_KEY } from "../../lib/checkout-total-binding"
 
 type SetupPaymentInput = {
   cart_id: string
@@ -86,36 +84,36 @@ export const setupPaymentStep = createStep(
       entity: "cart",
       fields: [
         "id",
+        "total",
+        "currency_code",
         "metadata",
         "payment_collection.id",
+        "payment_collection.amount",
         "payment_collection.payment_sessions.*",
       ],
       filters: { id: input.cart_id },
     })
 
-    let paymentCollectionId = cart?.payment_collection?.id
-
-    // Create payment collection if none exists
+    const paymentCollectionId = cart?.payment_collection?.id
     if (!paymentCollectionId) {
-      await createPaymentCollectionForCartWorkflow(container).run({
-        input: { cart_id: input.cart_id },
-      })
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cart ${input.cart_id} has no payment collection to pay`
+      )
+    }
 
-      // Re-fetch to get the payment collection ID
-      const { data: [updatedCart] } = await query.graph({
-        entity: "cart",
-        fields: ["id", "payment_collection.id"],
-        filters: { id: input.cart_id },
-      })
-
-      paymentCollectionId = updatedCart?.payment_collection?.id
-
-      if (!paymentCollectionId) {
-        throw new MedusaError(
-          MedusaError.Types.UNEXPECTED_STATE,
-          "Failed to create payment collection for cart"
-        )
-      }
+    const mismatch = checkoutTotalMismatch({
+      paymentProviderId: input.payment_provider_id,
+      cartTotal: cart?.total,
+      cartCurrency: cart?.currency_code,
+      paymentCollectionAmount: cart?.payment_collection?.amount,
+      cartMetadata: cart?.metadata,
+    })
+    if (mismatch) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cart ${input.cart_id} cannot be paid: ${mismatch}. Update the checkout session to get a fresh payment quote and sign it again.`
+      )
     }
 
     const sessions: ExistingPaymentSession[] = (cart?.payment_collection?.payment_sessions || [])
@@ -142,31 +140,9 @@ export const setupPaymentStep = createStep(
       })
     }
 
-    return new StepResponse(
-      {
-        cart_id: input.cart_id,
-        payment_collection_id: paymentCollectionId,
-      },
-      // Compensation data — used for cleanup on workflow failure
-      {
-        cart_id: input.cart_id,
-        payment_collection_id: paymentCollectionId,
-      }
-    )
-  },
-  // Compensation: refresh payment collection on failure
-  async (compensationData, { container }) => {
-    if (!compensationData?.cart_id) return
-
-    try {
-      const { refreshPaymentCollectionForCartWorkflow } = await import(
-        "@medusajs/medusa/core-flows"
-      )
-      await refreshPaymentCollectionForCartWorkflow(container).run({
-        input: { cart_id: compensationData.cart_id },
-      })
-    } catch {
-      // Best effort cleanup — don't throw from compensation
-    }
+    return new StepResponse({
+      cart_id: input.cart_id,
+      payment_collection_id: paymentCollectionId,
+    })
   }
 )

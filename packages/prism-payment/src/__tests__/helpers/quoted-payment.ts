@@ -24,6 +24,7 @@ export function unsignedCheckoutData(accepts: Record<string, unknown>[] = [quote
     ucp: { "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", config: { x402Version: 2, resource: { url: "https://shop.test/ucp/checkout-sessions/cart_1" }, accepts } }] },
     acp: null,
     preparedAmount: String(CART_TOTAL),
+    preparedCurrency: "usd",
     preparedResourceUrl: "https://shop.test/ucp/checkout-sessions/cart_1",
   }
 }
@@ -75,5 +76,5 @@ export function credential(overrides: Overrides = {}) {
 export const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64")
 
 export function quotedSession(): Record<string, unknown> {
-  return { payment_quote: storedQuoteFromCheckoutData(checkoutData), amount: CART_TOTAL }
+  return { payment_quote: storedQuoteFromCheckoutData(checkoutData), amount: CART_TOTAL, currency_code: "usd" }
 }

@@ -7,6 +7,7 @@ export type QuotedRequirements = X402AcceptEntry & { amount: string }
 type QuoteTerms = {
   x402Version: number
   preparedAmount: string
+  preparedCurrency: string
   accepts: QuotedRequirements[]
 }
 
@@ -16,6 +17,7 @@ export type QuoteBindingError =
   | "missing_payment_quote"
   | "invalid_quote_signature"
   | "quote_total_mismatch"
+  | "quote_currency_mismatch"
   | "missing_eip3009_fields"
   | "no_matching_quote_entry"
   | "amount_mismatch"
@@ -60,6 +62,7 @@ export function bindAuthorizationToQuote(
   authorization: X402PaymentAuthorization,
   storedQuote: unknown,
   sessionAmount: unknown,
+  sessionCurrency: unknown,
   nowSeconds: number,
   signingKey: string,
 ): QuoteBinding {
@@ -67,6 +70,7 @@ export function bindAuthorizationToQuote(
   if (!quote) return fail("missing_payment_quote")
   if (!signatureMatches(quote, signingKey)) return fail("invalid_quote_signature")
   if (!sameDecimal(quote.preparedAmount, sessionAmount)) return fail("quote_total_mismatch")
+  if (!sameCurrency(quote.preparedCurrency, sessionCurrency)) return fail("quote_currency_mismatch")
 
   const signed = authorization.paymentPayload?.payload?.authorization
   if (!signed || !allNonEmpty(signed.from, signed.to, signed.value, signed.validAfter, signed.validBefore, signed.nonce)) {
@@ -100,6 +104,7 @@ function quoteTermsFromCheckoutData(checkoutData: unknown): QuoteTerms | null {
   return asQuoteTerms({
     x402Version: config.x402Version,
     preparedAmount: checkoutData.preparedAmount,
+    preparedCurrency: checkoutData.preparedCurrency,
     accepts: config.accepts,
   })
 }
@@ -112,16 +117,16 @@ function asStoredQuote(value: unknown): StoredQuote | null {
 
 function asQuoteTerms(value: unknown): QuoteTerms | null {
   if (!isRecord(value)) return null
-  const { x402Version, preparedAmount, accepts } = value
-  if (typeof x402Version !== "number" || !allNonEmpty(preparedAmount) || !Array.isArray(accepts)) return null
+  const { x402Version, preparedAmount, preparedCurrency, accepts } = value
+  if (typeof x402Version !== "number" || !allNonEmpty(preparedAmount, preparedCurrency) || !Array.isArray(accepts)) return null
   const entries = accepts.filter(isQuotedRequirements)
   if (entries.length === 0 || entries.length !== accepts.length) return null
-  return { x402Version, preparedAmount: preparedAmount as string, accepts: entries }
+  return { x402Version, preparedAmount: preparedAmount as string, preparedCurrency: preparedCurrency as string, accepts: entries }
 }
 
 function sign(terms: QuoteTerms, signingKey: string): string {
-  const { x402Version, preparedAmount, accepts } = terms
-  return createHmac("sha256", signingKey).update(canonicalJson({ x402Version, preparedAmount, accepts })).digest("hex")
+  const { x402Version, preparedAmount, preparedCurrency, accepts } = terms
+  return createHmac("sha256", signingKey).update(canonicalJson({ x402Version, preparedAmount, preparedCurrency, accepts })).digest("hex")
 }
 
 function signatureMatches(quote: StoredQuote, signingKey: string): boolean {
@@ -161,6 +166,10 @@ function sameDecimal(a: unknown, b: unknown): boolean {
   const left = Number(a)
   const right = Number(b)
   return Number.isFinite(left) && Number.isFinite(right) && left === right
+}
+
+function sameCurrency(a: unknown, b: unknown): boolean {
+  return allNonEmpty(a, b) && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
 }
 
 function sameAtomicValue(a: string, b: string): boolean {
