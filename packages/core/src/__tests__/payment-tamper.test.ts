@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { createRequest, createResponse, createStoreService } from "./helpers/render-wire"
 import { extractSignedSummary } from "../lib/validate-signed-amount"
 import { paymentSessionDataFor } from "../workflows/steps/setup-payment"
@@ -31,6 +31,7 @@ vi.mock("@medusajs/framework/workflows-sdk", async (importOriginal) => ({
 import { POST as ucpComplete } from "../api/ucp/checkout-sessions/[id]/complete/route"
 import { setupPaymentStep } from "../workflows/steps/setup-payment"
 import { paymentToCapture } from "../lib/payment-to-capture"
+import AgenticCommerceService from "../modules/agentic-commerce/service"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const QUOTED_AMOUNT = "1500000"
@@ -329,5 +330,64 @@ describe("payment captured after a UCP completion", () => {
 
   it("captures nothing when only other providers hold a payment", () => {
     expect(paymentToCapture(cartWith([{ id: "pay_system", provider_id: "pp_system_default" }]), "pp_prism_prism")).toBeNull()
+  })
+})
+
+describe("payment provider configured for agentic checkout", () => {
+  const prismAdapters = { payment_handler_adapters: ["prismPaymentHandler"] }
+
+  beforeEach(() => {
+    vi.stubEnv("AGENTIC_PAYMENT_PROVIDER", "")
+    vi.stubEnv("NODE_ENV", "development")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("refuses to start without a payment provider", () => {
+    expect(() => new AgenticCommerceService({}, prismAdapters)).toThrow("payment_provider_id is required")
+  })
+
+  it("refuses the system provider while a payment handler is configured", () => {
+    expect(() => new AgenticCommerceService({}, {
+      ...prismAdapters,
+      payment_provider_id: "pp_system_default",
+      allow_system_payment_provider: true,
+    })).toThrow("pp_system_default")
+  })
+
+  it("refuses the system provider from the environment without an explicit opt-in", () => {
+    vi.stubEnv("AGENTIC_PAYMENT_PROVIDER", "pp_system_default")
+
+    expect(() => new AgenticCommerceService({}, {})).toThrow("pp_system_default")
+  })
+
+  it.each([["production"], [""], ["staging"]])("refuses the opted-in system provider when NODE_ENV is %j", (nodeEnv) => {
+    vi.stubEnv("NODE_ENV", nodeEnv)
+
+    expect(() => new AgenticCommerceService({}, {
+      payment_provider_id: "pp_system_default",
+      allow_system_payment_provider: true,
+    })).toThrow("pp_system_default")
+  })
+
+  it("allows the opted-in system provider for local development without payment handlers", () => {
+    const service = new AgenticCommerceService({}, {
+      payment_provider_id: "pp_system_default",
+      allow_system_payment_provider: true,
+    })
+
+    expect(service.getPaymentProviderId()).toBe("pp_system_default")
+  })
+
+  it("uses the configured Prism provider", () => {
+    expect(new AgenticCommerceService({}, { ...prismAdapters, payment_provider_id: "pp_prism_prism" }).getPaymentProviderId()).toBe("pp_prism_prism")
+  })
+
+  it("uses the provider from the environment", () => {
+    vi.stubEnv("AGENTIC_PAYMENT_PROVIDER", "pp_prism_prism")
+
+    expect(new AgenticCommerceService({}, prismAdapters).getPaymentProviderId()).toBe("pp_prism_prism")
   })
 })

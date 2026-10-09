@@ -73,6 +73,7 @@ export default defineConfig({
         api_key: process.env.AGENTIC_COMMERCE_API_KEY,
         storefront_url: process.env.STOREFRONT_URL,
         store_name: "Your Store",
+        payment_provider_id: "pp_prism_prism",
         payment_handler_adapters: ["prismPaymentHandler"],
       },
     },

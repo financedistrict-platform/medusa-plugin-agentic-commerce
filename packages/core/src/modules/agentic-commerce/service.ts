@@ -17,6 +17,7 @@ import { PaymentHandlerRegistry } from "../../lib/payment-handler-registry"
 import type { PaymentHandlerAdapter } from "../../types/payment-handler-adapter"
 import type { FormatterContext } from "../../lib/formatters/types"
 import { validateWebhookUrl } from "../../lib/validate-webhook-url"
+import { resolvePaymentProviderId } from "../../lib/payment-provider-config"
 import * as ucpFormatter from "../../lib/formatters/ucp"
 import * as acpFormatter from "../../lib/formatters/acp"
 import {
@@ -32,6 +33,7 @@ export type AgenticCommerceOptions = {
   store_description?: string
   api_key?: string
   payment_provider_id?: string
+  allow_system_payment_provider?: boolean
   ucp_version?: string
   ucp_supported_versions?: string[]
   ucp_version_negotiation?: UcpVersionNegotiation
@@ -77,7 +79,7 @@ export default class AgenticCommerceService {
     this.storeName = options.store_name || process.env.AGENTIC_STORE_NAME || "My Store"
     this.storeDescription = options.store_description || process.env.AGENTIC_STORE_DESCRIPTION || ""
     this.apiKey = options.api_key || process.env.AGENTIC_COMMERCE_API_KEY || ""
-    this.paymentProviderId = options.payment_provider_id || process.env.AGENTIC_PAYMENT_PROVIDER || "pp_system_default"
+    this.paymentProviderId = resolvePaymentProviderId(options)
     this.ucpRegistry = createUcpVersionRegistry(options)
     this.ucpVersion = this.ucpRegistry.current
     this.acpVersion = options.acp_version || "2026-01-30"

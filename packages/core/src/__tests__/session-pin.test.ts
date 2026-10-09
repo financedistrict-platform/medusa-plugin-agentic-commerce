@@ -25,7 +25,7 @@ function pinMiddleware(): Middleware {
 }
 
 function pinRequest(metadata: Record<string, unknown> | undefined, ucp: UcpResolution) {
-  const service = new AgenticCommerceService({}, { ucp_version: "2026-04-08" })
+  const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08" })
   const warnings: string[] = []
   const services: Record<string, unknown> = {
     agenticCommerce: service,
@@ -105,7 +105,7 @@ describe("ucpVersionFor", () => {
   })
 
   it("falls back to the configured current version before resolution", () => {
-    const service = new AgenticCommerceService({}, { ucp_version: "2026-08-25" })
+    const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version: "2026-08-25" })
     expect(ucpVersionFor({ scope: { resolve: () => service } })).toBe("2026-08-25")
   })
 })

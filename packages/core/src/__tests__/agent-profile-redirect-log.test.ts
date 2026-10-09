@@ -20,7 +20,7 @@ function resolveMiddleware(): Middleware {
 }
 
 function request(profile = "https://agent.example/.well-known/ucp/2026-08-25/") {
-  const service = new AgenticCommerceService({}, { store_name: "Demo Store", ucp_version: "2026-04-08" })
+  const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", store_name: "Demo Store", ucp_version: "2026-04-08" })
   const warnings: string[] = []
   const services: Record<string, unknown> = { agenticCommerce: service, logger: { warn: (m: string) => warnings.push(m) } }
   return {
