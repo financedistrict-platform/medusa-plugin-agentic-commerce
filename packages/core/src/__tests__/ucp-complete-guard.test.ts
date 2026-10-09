@@ -67,9 +67,24 @@ describe("checkQuoteBinding", () => {
     expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(credential)))).toBeNull()
   })
 
-  it("skips carts without a Prism quote", () => {
-    expect(checkQuoteBinding({}, HANDLER_ID, extractSignedSummary(toBase64(credential)))).toBeNull()
-    expect(checkQuoteBinding(undefined, undefined, extractSignedSummary(toBase64(credential)))).toBeNull()
+  it.each([
+    ["empty metadata", {}],
+    ["missing metadata", undefined],
+    ["a cleared quote", { prism_checkout_data: null }],
+  ])("rejects a cart with %s instead of skipping the check", (_label, metadata) => {
+    expect(checkQuoteBinding(metadata, HANDLER_ID, extractSignedSummary(toBase64(credential))))
+      .toMatchObject({ status: 422, code: "no_payment_quote" })
+  })
+
+  it("rejects an unreadable credential on a cart without a quote", () => {
+    expect(checkQuoteBinding({}, HANDLER_ID, null)).toMatchObject({ status: 422, code: "invalid_credential" })
+  })
+
+  it("reads the ACP quote for the acp protocol", () => {
+    const acpQuoted = { prism_checkout_data: { acp: { config: quotedMetadata.prism_checkout_data.ucp[HANDLER_ID][0].config } } }
+    expect(checkQuoteBinding(acpQuoted, HANDLER_ID, extractSignedSummary(toBase64(credential)), "acp")).toBeNull()
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(credential)), "acp"))
+      .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but the handler_id finds no stored accepts", () => {
