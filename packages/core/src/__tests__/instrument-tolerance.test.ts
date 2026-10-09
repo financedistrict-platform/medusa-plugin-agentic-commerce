@@ -21,18 +21,16 @@ const credential = {
 }
 const { type: _type, ...untypedCredential } = credential
 
-const quotedMetadata = {
-  prism_checkout_data: {
-    ucp: {
-      [PRISM_UCP_HANDLER_ID]: [{
-        id: "x402",
-        version: "2026-01-15",
-        config: {
-          x402Version: 2,
-          accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }],
-        },
-      }],
-    },
+const storedQuote = {
+  ucp: {
+    [PRISM_UCP_HANDLER_ID]: [{
+      id: "x402",
+      version: "2026-01-15",
+      config: {
+        x402Version: 2,
+        accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }],
+      },
+    }],
   },
 }
 
@@ -61,16 +59,16 @@ describe("original-era instruments", () => {
 describe("quote binding with original-era handler ids", () => {
   it.each([PRISM_UCP_HANDLER_ID, "x402", undefined])("finds the stored quote for handler_id %s", (handlerId) => {
     expect(normalizePrismHandlerId(handlerId)).toBe(PRISM_UCP_HANDLER_ID)
-    expect(checkQuoteBinding(quotedMetadata, handlerId, extractSignedSummary(toBase64(credential)))).toBeNull()
+    expect(checkQuoteBinding(storedQuote, handlerId, extractSignedSummary(toBase64(credential)))).toBeNull()
   })
 
   it("keeps rejecting a tampered amount for an original-era instrument", () => {
     const tampered = { ...credential, paymentPayload: { ...credential.paymentPayload, payload: { authorization: { value: "1", to: "0xMerchant" } } } }
-    expect(checkQuoteBinding(quotedMetadata, "x402", extractSignedSummary(toBase64(tampered)))).toMatchObject({ status: 422, code: "amount_mismatch" })
+    expect(checkQuoteBinding(storedQuote, "x402", extractSignedSummary(toBase64(tampered)))).toMatchObject({ status: 422, code: "amount_mismatch" })
   })
 
   it("does not map other handler ids onto the Prism quote", () => {
     expect(normalizePrismHandlerId("com.other.pay")).toBe("com.other.pay")
-    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", extractSignedSummary(toBase64(credential)))).toMatchObject({ status: 422, code: "no_payment_quote" })
+    expect(checkQuoteBinding(storedQuote, "com.other.pay", extractSignedSummary(toBase64(credential)))).toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 })

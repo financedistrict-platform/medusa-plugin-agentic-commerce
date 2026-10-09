@@ -14,7 +14,7 @@ type CheckoutTotals = {
   cartTotal: unknown
   cartCurrency: unknown
   paymentCollectionAmount: unknown
-  cartMetadata: unknown
+  storedQuote: unknown
 }
 
 export function checkoutTotalMismatch({
@@ -22,18 +22,17 @@ export function checkoutTotalMismatch({
   cartTotal,
   cartCurrency,
   paymentCollectionAmount,
-  cartMetadata,
+  storedQuote,
 }: CheckoutTotals): CheckoutTotalMismatch | null {
   if (amountOf(cartTotal) === null) return "missing_cart_total"
   if (!sameAmount(paymentCollectionAmount, cartTotal)) return "payment_amount_mismatch"
   if (!isPrismProvider(paymentProviderId)) return null
 
-  const quote = isRecord(cartMetadata) ? cartMetadata[PRISM_CHECKOUT_DATA_KEY] : undefined
-  if (!isRecord(quote) || quote.preparedAmount === undefined || !isCurrencyCode(quote.preparedCurrency)) {
+  if (!isRecord(storedQuote) || storedQuote.preparedAmount === undefined || !isCurrencyCode(storedQuote.preparedCurrency)) {
     return "missing_payment_quote"
   }
-  if (!sameAmount(quote.preparedAmount, cartTotal)) return "quote_total_mismatch"
-  return sameCurrency(quote.preparedCurrency, cartCurrency) ? null : "quote_currency_mismatch"
+  if (!sameAmount(storedQuote.preparedAmount, cartTotal)) return "quote_total_mismatch"
+  return sameCurrency(storedQuote.preparedCurrency, cartCurrency) ? null : "quote_currency_mismatch"
 }
 
 function isCurrencyCode(value: unknown): value is string {

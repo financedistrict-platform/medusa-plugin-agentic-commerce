@@ -239,9 +239,10 @@ describe("Prism quote produced by the handler", () => {
     return adapter
   }
 
-  const prepare = (adapter: PrismPaymentHandlerAdapter, metadata: Record<string, unknown> = {}) =>
+  const prepare = (adapter: PrismPaymentHandlerAdapter, metadata: Record<string, unknown> = {}, stored?: unknown) =>
     adapter.prepareCheckoutPayment({
       cart: { id: "cart_1", total: CART_TOTAL, currency_code: "usd", metadata },
+      stored,
       checkoutBaseUrl: "https://shop.test/ucp/checkout-sessions",
       storeName: "Shop",
       ucpVersion: "2026-04-08",
@@ -264,10 +265,50 @@ describe("Prism quote produced by the handler", () => {
     const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
     const forged = unsignedCheckoutData([{ ...quotedEntry, amount: "1" }])
 
-    const prepared = await prepare(handlerWith(preparePayment), { prism_checkout_data: forged })
+    const prepared = await prepare(handlerWith(preparePayment), {}, forged)
 
     expect(preparePayment).toHaveBeenCalledTimes(1)
     expect(prepared?.ucp?.["xyz.fd.prism_payment"][0].config.accepts[0].amount).toBe(quotedEntry.amount)
     expect(prepared?.quoteSignature).toBe(checkoutData.quoteSignature)
+  })
+
+  it("reuses the quote the server stored for the cart without asking Prism again", async () => {
+    const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
+
+    const prepared = await prepare(handlerWith(preparePayment), {}, checkoutData)
+
+    expect(preparePayment).not.toHaveBeenCalled()
+    expect(prepared).toEqual(checkoutData)
+  })
+
+  it("ignores a signed quote found in cart metadata and prepares a fresh one", async () => {
+    const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
+
+    await prepare(handlerWith(preparePayment), { prism_checkout_data: checkoutData })
+
+    expect(preparePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("never writes the quote into buyer-writable cart metadata", async () => {
+    const updateCarts = vi.fn()
+    const adapter = handlerWith(vi.fn().mockResolvedValue(preparedConfig))
+
+    await adapter.prepareCheckoutPayment({
+      cart: { id: "cart_1", total: CART_TOTAL, currency_code: "usd", metadata: {} },
+      checkoutBaseUrl: "https://shop.test/ucp/checkout-sessions",
+      storeName: "Shop",
+      ucpVersion: "2026-04-08",
+      container: { resolve: () => ({ updateCarts }) },
+    } as any)
+
+    expect(updateCarts).not.toHaveBeenCalled()
+  })
+
+  it("reads the handlers it advertises from the stored quote, not from cart metadata", () => {
+    const adapter = handlerWith(vi.fn())
+
+    expect(adapter.getUcpCheckoutHandlers(checkoutData)).toEqual(checkoutData.ucp)
+    expect(adapter.getAcpCheckoutHandlers(undefined)).toEqual([])
+    expect(adapter.getUcpCheckoutHandlers({ prism_checkout_data: checkoutData } as any)).toEqual({})
   })
 })

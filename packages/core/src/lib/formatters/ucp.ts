@@ -6,6 +6,7 @@
  */
 
 import { medusaToUcpAddress } from "../address-translator"
+import { handlerDataOf, requireLoadedSession } from "../agent-session"
 import { resolveUcpStatus, resolveMissingRequirements, type UcpStatus } from "../status-maps"
 import type { FormatterContext } from "./types"
 import { toMinor } from "./types"
@@ -131,14 +132,14 @@ function buildCheckoutMessages(ctx: FormatterContext, cart: any, status: UcpStat
 // UCP Envelope
 // =====================================================
 
-function ucpEnvelope(ctx: FormatterContext, includePayment: boolean, cartMetadata?: Record<string, unknown>) {
+function ucpEnvelope(ctx: FormatterContext, includePayment: boolean, handlerData?: Record<string, unknown>) {
   const envelope: Record<string, unknown> = {
     version: ctx.ucpWire.version,
     status: "success",
     capabilities: ctx.ucpWire.envelopeCapabilities(),
   }
   if (includePayment) {
-    envelope.payment_handlers = ctx.ucpWire.checkoutHandlers(ctx.paymentHandlers.getUcpCheckoutHandlers(cartMetadata))
+    envelope.payment_handlers = ctx.ucpWire.checkoutHandlers(ctx.paymentHandlers.getUcpCheckoutHandlers(handlerData))
   }
   return envelope
 }
@@ -241,6 +242,7 @@ export function formatUcpCheckoutSession(
   baseUrl: string,
   shippingOptions?: any[]
 ) {
+  requireLoadedSession(cart)
   const currency = (cart.currency_code || "eur").toUpperCase()
   const status = resolveUcpStatus(cart)
 
@@ -251,7 +253,7 @@ export function formatUcpCheckoutSession(
     : undefined
 
   const session: Record<string, unknown> = {
-    ucp: ucpEnvelope(ctx, true, cart.metadata),
+    ucp: ucpEnvelope(ctx, true, handlerDataOf(cart.agent_session)),
     id: cart.id,
     status,
     currency,

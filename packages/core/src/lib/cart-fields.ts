@@ -37,7 +37,6 @@ export const CART_VALIDATION_FIELDS = [
   "id",
   "email",
   "completed_at",
-  "metadata",
   "items.id",
   "shipping_address.id",
   "shipping_methods.id",

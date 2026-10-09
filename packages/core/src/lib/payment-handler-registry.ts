@@ -15,6 +15,7 @@
  */
 
 import type { PaymentHandlerAdapter, CheckoutPrepareInput } from "../types/payment-handler-adapter"
+import { agentSessions, handlerDataOf } from "./agent-session"
 
 export class PaymentHandlerRegistry {
   private adapters: PaymentHandlerAdapter[] = []
@@ -107,26 +108,34 @@ export class PaymentHandlerRegistry {
    * Prepare checkout payment requirements via all registered adapters.
    * Calls each adapter in parallel. Returns results keyed by adapter ID.
    *
-   * Each adapter stores its own data on cart metadata under its own key.
+   * Each adapter gets back what it returned last time (input.stored) and the
+   * result is persisted in the agent session under the adapter's ID.
    */
   async prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<Record<string, unknown | null>> {
     if (this.adapters.length === 0) return {}
 
+    const sessions = agentSessions(input.container)
+    const stored = handlerDataOf((input.cart as { agent_session?: Parameters<typeof handlerDataOf>[0] }).agent_session)
+
     const results = await Promise.allSettled(
       this.adapters.map(async (a) => ({
         id: a.id,
-        result: await a.prepareCheckoutPayment(input),
+        result: await a.prepareCheckoutPayment({ ...input, stored: stored[a.id] }),
       }))
     )
 
     const output: Record<string, unknown | null> = {}
-    for (const result of results) {
+    this.adapters.forEach((adapter, index) => {
+      const result = results[index]
       if (result.status === "fulfilled") {
-        output[result.value.id] = result.value.result
+        output[adapter.id] = result.value.result ?? null
       } else {
+        output[adapter.id] = null
         console.error(`[payment-handler-registry] Adapter failed during checkout-prepare:`, result.reason)
       }
-    }
+    })
+
+    await sessions.storeHandlerData(input.cart.id, output)
 
     return output
   }
@@ -138,12 +147,12 @@ export class PaymentHandlerRegistry {
   /**
    * Get combined UCP payment_handlers for a checkout session response.
    */
-  getUcpCheckoutHandlers(cartMetadata?: Record<string, unknown>): Record<string, unknown[]> {
+  getUcpCheckoutHandlers(handlerData: Record<string, unknown> = {}): Record<string, unknown[]> {
     if (this.adapters.length === 0) return {}
 
     const merged: Record<string, unknown[]> = {}
     for (const adapter of this.adapters) {
-      const handlers = adapter.getUcpCheckoutHandlers(cartMetadata)
+      const handlers = adapter.getUcpCheckoutHandlers(handlerData[adapter.id])
       for (const [namespace, entries] of Object.entries(handlers)) {
         if (!merged[namespace]) {
           merged[namespace] = []
@@ -158,12 +167,12 @@ export class PaymentHandlerRegistry {
   /**
    * Get combined ACP payment handlers for a checkout session response.
    */
-  getAcpCheckoutHandlers(cartMetadata?: Record<string, unknown>): unknown[] {
+  getAcpCheckoutHandlers(handlerData: Record<string, unknown> = {}): unknown[] {
     if (this.adapters.length === 0) return []
 
     const merged: unknown[] = []
     for (const adapter of this.adapters) {
-      merged.push(...adapter.getAcpCheckoutHandlers(cartMetadata))
+      merged.push(...adapter.getAcpCheckoutHandlers(handlerData[adapter.id]))
     }
 
     return merged

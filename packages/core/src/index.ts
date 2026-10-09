@@ -22,7 +22,9 @@
  *         api_key: process.env.PRISM_API_KEY,
  *       },
  *     },
- *     // 2. Register the core agentic commerce module
+ *     // 2. Register the agent session module (owns quotes and session state)
+ *     { resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agent-session" },
+ *     // 3. Register the core agentic commerce module
  *     {
  *       resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agentic-commerce",
  *       options: {
@@ -43,12 +45,14 @@
 // =====================================================
 
 export { default as AgenticCommerceModule, AGENTIC_COMMERCE_MODULE } from "./modules/agentic-commerce"
+export { default as AgentSessionModule, AGENT_SESSION_MODULE } from "./modules/agent-session"
 
 // =====================================================
 // Payment Handler Adapter Interface (for plugin authors)
 // =====================================================
 
 export type { PaymentHandlerAdapter, CheckoutPrepareInput } from "./types/payment-handler-adapter"
+export type { AgentSessionRecord, AgentSessionStore } from "./lib/agent-session"
 export { PaymentHandlerRegistry } from "./lib/payment-handler-registry"
 
 // =====================================================

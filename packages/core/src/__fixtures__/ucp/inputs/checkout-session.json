@@ -9,41 +9,7 @@
     "metadata": {
       "protocol": "ucp",
       "protocol_version": "2026-04-08",
-      "checkout_session_created_at": "2026-09-30T10:00:00.000Z",
-      "prism_checkout_data": {
-        "ucp": {
-          "xyz.fd.prism_payment": [
-            {
-              "id": "x402",
-              "version": "2026-01-15",
-              "config": {
-                "x402Version": 2,
-                "resource": {
-                  "url": "https://gw.example/checkout/1",
-                  "description": "Order checkout at Demo Store"
-                },
-                "accepts": [
-                  {
-                    "scheme": "exact",
-                    "network": "eip155:84532",
-                    "payTo": "0x1111111111111111111111111111111111111111",
-                    "maxTimeoutSeconds": 300,
-                    "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-                    "extra": {
-                      "name": "USDC",
-                      "version": "2"
-                    },
-                    "amount": "1000000"
-                  }
-                ]
-              }
-            }
-          ]
-        },
-        "acp": null,
-        "preparedAmount": "55",
-        "preparedResourceUrl": "https://store.test/ucp/checkout-sessions/cart_01"
-      }
+      "checkout_session_created_at": "2026-09-30T10:00:00.000Z"
     },
     "subtotal": 50,
     "item_subtotal": 50,
@@ -90,7 +56,45 @@
         "amount": 5
       }
     ],
-    "payment_collection": null
+    "payment_collection": null,
+    "agent_session": {
+      "handler_data": {
+        "xyz.fd.prism_payment": {
+          "ucp": {
+            "xyz.fd.prism_payment": [
+              {
+                "id": "x402",
+                "version": "2026-01-15",
+                "config": {
+                  "x402Version": 2,
+                  "resource": {
+                    "url": "https://gw.example/checkout/1",
+                    "description": "Order checkout at Demo Store"
+                  },
+                  "accepts": [
+                    {
+                      "scheme": "exact",
+                      "network": "eip155:84532",
+                      "payTo": "0x1111111111111111111111111111111111111111",
+                      "maxTimeoutSeconds": 300,
+                      "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                      "extra": {
+                        "name": "USDC",
+                        "version": "2"
+                      },
+                      "amount": "1000000"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "acp": null,
+          "preparedAmount": "55",
+          "preparedResourceUrl": "https://store.test/ucp/checkout-sessions/cart_01"
+        }
+      }
+    }
   },
   "shipping_options": [
     {

@@ -1,14 +1,15 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
+import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
 import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
 import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
   checkPrismInstrument,
   checkQuoteBinding,
+  PRISM_UCP_HANDLER_ID,
   formatZodIssuePath,
   isPrismProvider,
   type GuardFailure,
@@ -70,12 +71,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       return
     }
 
-    const { data: [cartForValidation] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata"],
-      filters: { id },
-    })
-    const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, signedSummary)
+    const session = await agentSessions(req.scope).find(id)
+    const bindingFailure = checkQuoteBinding(handlerDataOf(session)[PRISM_UCP_HANDLER_ID], handlerId, signedSummary)
     if (bindingFailure) {
       reject(bindingFailure)
       return
@@ -117,11 +114,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     // Fetch completed cart for formatting (includes the cart→order link)
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const cart = await fetchSessionCart(req.scope, id)
 
     // Resolve the actual order id from whichever source is available.
     // The workflow result is authoritative for a fresh completion, but the cart's

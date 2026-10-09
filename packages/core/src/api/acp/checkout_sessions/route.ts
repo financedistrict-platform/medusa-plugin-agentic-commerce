@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-session"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
+import { fetchSessionCart } from "../../../lib/agent-session"
 import { acpAddressToMedusa } from "../../../lib/address-translator"
 import { formatAcpError, httpStatusToAcpType } from "../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../lib/public-url"
@@ -54,12 +54,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     })
 
     // Fetch full cart for formatting (need totals for checkout-prepare)
-    const query = req.scope.resolve("query") as any
-    const { data: [fullCart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id: cart.id },
-    })
+    const fullCart = await fetchSessionCart(req.scope, cart.id)
 
     // Step 2: Call Prism checkout-prepare to get x402 payment requirements
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
@@ -75,11 +70,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     })
 
     // Re-fetch cart to include updated metadata
-    const { data: [cartWithPayment] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id: cart.id },
-    })
+    const cartWithPayment = await fetchSessionCart(req.scope, cart.id)
 
     const session = agenticCommerceService.formatAcpCheckoutSession(
       cartWithPayment || fullCart,

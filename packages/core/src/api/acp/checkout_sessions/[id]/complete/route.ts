@@ -1,11 +1,11 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatAcpError, httpStatusToAcpType } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
-import { checkQuoteBinding, isPrismProvider } from "../../../../../lib/ucp-complete-guard"
+import { checkQuoteBinding, isPrismProvider, PRISM_UCP_HANDLER_ID } from "../../../../../lib/ucp-complete-guard"
+import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -35,13 +35,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const query = req.scope.resolve("query") as any
 
   if (isPrismProvider(paymentProviderId)) {
-    const { data: [cartForValidation] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata"],
-      filters: { id },
-    })
+    const session = await agentSessions(req.scope).find(id)
     const bindingFailure = checkQuoteBinding(
-      cartForValidation?.metadata,
+      handlerDataOf(session)[PRISM_UCP_HANDLER_ID],
       paymentHandlerId,
       extractSignedSummary(eip3009Authorization),
       "acp",
@@ -93,11 +89,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     // Fetch completed cart for formatting (includes the cart→order link)
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const cart = await fetchSessionCart(req.scope, id)
 
     // Resolve order id: prefer the workflow result, fall back to the cart link.
     const orderId: string | null =

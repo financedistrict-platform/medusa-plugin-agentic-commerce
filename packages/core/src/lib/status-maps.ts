@@ -3,6 +3,8 @@
  * Maps from Medusa cart state to each protocol's required status values.
  */
 
+import { isCanceled } from "./agent-session"
+
 // --- ACP Status ---
 // Full spec values per schema.agentic_checkout.json:
 //   incomplete, not_ready_for_payment, requires_escalation,
@@ -32,7 +34,7 @@ export type AcpStatusOpts = {
 }
 
 export function resolveAcpStatus(cart: any, opts?: AcpStatusOpts): AcpStatus {
-  if (cart.metadata?.checkout_session_canceled) return "canceled"
+  if (isCanceled(cart.agent_session)) return "canceled"
   if (cart.completed_at) return "completed"
   if (opts?.expired) return "expired"
   if (opts?.completeInProgress) return "complete_in_progress"
@@ -62,7 +64,7 @@ export function resolveUcpStatus(
   cart: any,
   opts?: { requiresEscalation?: boolean; completeInProgress?: boolean }
 ): UcpStatus {
-  if (cart.metadata?.checkout_session_canceled) return "canceled"
+  if (isCanceled(cart.agent_session)) return "canceled"
   if (cart.completed_at) return "completed"
   if (opts?.completeInProgress) return "complete_in_progress"
   if (opts?.requiresEscalation) return "requires_escalation"
