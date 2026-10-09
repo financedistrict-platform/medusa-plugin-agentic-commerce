@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createRequest, createResponse, createStoreService } from "./helpers/render-wire"
+import { fakeAgentSessions } from "./helpers/agent-session-store"
 
 vi.mock("../workflows/create-checkout-session", () => ({
   default: () => ({ run: async () => ({ result: { id: "cart_1" } }) }),
@@ -27,7 +28,7 @@ const HANDLER_ID = "xyz.fd.prism_payment"
 const quote = {
   config: { x402Version: 2, accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }] },
 }
-const quotedMetadata = { prism_checkout_data: { ucp: { [HANDLER_ID]: [{ id: HANDLER_ID, ...quote }] }, acp: quote } }
+const storedQuote = { ucp: { [HANDLER_ID]: [{ id: HANDLER_ID, ...quote }] }, acp: quote }
 const signedAuthorization = Buffer.from(JSON.stringify({
   x402Version: 2,
   paymentPayload: {
@@ -44,11 +45,12 @@ function setup(ucp?: { version: string }) {
   const prepareCheckoutPayment = vi.fn().mockResolvedValue({})
   const getAcpDiscoveryHandlers = vi.fn().mockResolvedValue([])
   ;(service as any).getPaymentHandlerService = () => ({ prepareCheckoutPayment, getAcpDiscoveryHandlers })
-  const cart = { id: "cart_1", items: [], metadata: quotedMetadata }
-  const query = { graph: vi.fn(async () => ({ data: [cart], metadata: quotedMetadata })) }
+  const cart = { id: "cart_1", items: [], metadata: {} }
+  const query = { graph: vi.fn(async () => ({ data: [cart] })) }
+  const agenticCommerceSession = fakeAgentSessions([{ cart_id: "cart_1", handler_data: { [HANDLER_ID]: storedQuote } }])
   completeRun.mockClear()
   const req = {
-    ...createRequest({ agenticCommerce: service, query }, { id: "cart_1" }),
+    ...createRequest({ agenticCommerce: service, query, agenticCommerceSession }, { id: "cart_1" }),
     validatedBody: {},
     ucp,
   }

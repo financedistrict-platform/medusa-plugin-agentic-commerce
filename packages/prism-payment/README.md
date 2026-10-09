@@ -65,7 +65,13 @@ export default defineConfig({
       },
     },
 
-    // 3. Core agentic commerce service (references the adapter above)
+    // 3. Agent session module (stores the payment quote server-side)
+    {
+      key: "agenticCommerceSession",
+      resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agent-session",
+    },
+
+    // 4. Core agentic commerce service (references the adapter above)
     {
       key: "agenticCommerce",
       resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agentic-commerce",

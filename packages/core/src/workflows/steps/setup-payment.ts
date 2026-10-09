@@ -5,6 +5,8 @@ import {
   deletePaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
 import { checkoutTotalMismatch, PRISM_CHECKOUT_DATA_KEY } from "../../lib/checkout-total-binding"
+import { agentSessions, handlerDataOf, isCanceled } from "../../lib/agent-session"
+import { PRISM_UCP_HANDLER_ID } from "../../lib/ucp-complete-guard"
 
 type SetupPaymentInput = {
   cart_id: string
@@ -25,7 +27,7 @@ type SetupPaymentInput = {
 
 export function paymentSessionDataFor(
   input: Pick<SetupPaymentInput, "ucp_version" | "payment_data">,
-  cartMetadata: Record<string, unknown> | null | undefined,
+  storedQuote: unknown,
 ): Record<string, unknown> {
   const sessionData: Record<string, unknown> = { ucp_version: input.ucp_version }
 
@@ -43,7 +45,6 @@ export function paymentSessionDataFor(
     sessionData.shared_payment_token = input.payment_data.token
   }
 
-  const storedQuote = cartMetadata?.[PRISM_CHECKOUT_DATA_KEY]
   if (storedQuote) {
     sessionData[PRISM_CHECKOUT_DATA_KEY] = storedQuote
   }
@@ -86,7 +87,6 @@ export const setupPaymentStep = createStep(
         "id",
         "total",
         "currency_code",
-        "metadata",
         "payment_collection.id",
         "payment_collection.amount",
         "payment_collection.payment_sessions.*",
@@ -102,12 +102,21 @@ export const setupPaymentStep = createStep(
       )
     }
 
+    const session = await agentSessions(container).find(input.cart_id)
+    if (!session || isCanceled(session)) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cart ${input.cart_id} cannot be paid: checkout session is ${session ? "canceled" : "not found"}`
+      )
+    }
+    const storedQuote = handlerDataOf(session)[PRISM_UCP_HANDLER_ID]
+
     const mismatch = checkoutTotalMismatch({
       paymentProviderId: input.payment_provider_id,
       cartTotal: cart?.total,
       cartCurrency: cart?.currency_code,
       paymentCollectionAmount: cart?.payment_collection?.amount,
-      cartMetadata: cart?.metadata,
+      storedQuote,
     })
     if (mismatch) {
       throw new MedusaError(
@@ -134,7 +143,7 @@ export const setupPaymentStep = createStep(
         input: {
           payment_collection_id: paymentCollectionId,
           provider_id: input.payment_provider_id,
-          data: paymentSessionDataFor(input, cart?.metadata),
+          data: paymentSessionDataFor(input, storedQuote),
           context: {},
         },
       })

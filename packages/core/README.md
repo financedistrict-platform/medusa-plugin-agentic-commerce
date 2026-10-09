@@ -45,6 +45,11 @@ export default defineConfig({
     },
   ],
   modules: [
+    // Register the agent session module (owns quotes, ownership and cancellation state)
+    {
+      key: "agenticCommerceSession",
+      resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agent-session",
+    },
     // Register the core service module with your configuration
     {
       key: "agenticCommerce",
@@ -63,6 +68,8 @@ export default defineConfig({
   ],
 })
 ```
+
+Run `npx medusa db:migrate` after installing or upgrading: the agent session module creates the `agent_session` table. Checkout sessions opened before this version have no row and must be recreated by the agent.
 
 ### 3. Set Environment Variables
 
@@ -207,18 +214,19 @@ export default class MyPaymentAdapter implements PaymentHandlerAdapter {
     }]
   }
 
-  // Checkout preparation — called when a checkout session is created
+  // Checkout preparation — called when a checkout session is created or updated.
+  // input.stored is what you returned last time; the plugin persists the result.
   async prepareCheckoutPayment(input: CheckoutPrepareInput) {
     // Call your payment gateway, return config for the agent
     return { id: "my-handler", version: "1.0.0", config: { /* ... */ } }
   }
 
   // Response formatting — include payment config in checkout responses
-  getUcpCheckoutHandlers(cartMetadata?: Record<string, unknown>) {
+  getUcpCheckoutHandlers(stored?: unknown) {
     return { /* ... */ }
   }
 
-  getAcpCheckoutHandlers(cartMetadata?: Record<string, unknown>) {
+  getAcpCheckoutHandlers(stored?: unknown) {
     return [/* ... */]
   }
 }
@@ -255,6 +263,9 @@ medusa-config.ts
   |     Routes, workflows, subscribers, jobs auto-discovered
   |
   +-- modules:
+        +-- agenticCommerceSession (agent_session table)
+        |     Fingerprint, UCP version pin, cancellation, payment quotes
+        |
         +-- agenticCommerce (core service)
         |     Config, auth, formatting, payment registry
         |

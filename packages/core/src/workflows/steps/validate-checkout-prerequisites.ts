@@ -1,6 +1,7 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/utils"
 import { CART_VALIDATION_FIELDS } from "../../lib/cart-fields"
+import { agentSessions, isCanceled } from "../../lib/agent-session"
 
 type ValidateInput = {
   cart_id: string
@@ -24,7 +25,15 @@ export const validateCheckoutPrerequisitesStep = createStep(
       )
     }
 
-    if (cart.metadata?.checkout_session_canceled) {
+    const session = await agentSessions(container).find(cart_id)
+    if (!session) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Checkout session ${cart_id} not found`
+      )
+    }
+
+    if (isCanceled(session)) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
         "Checkout session has been cancelled"

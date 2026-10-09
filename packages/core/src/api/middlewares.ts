@@ -14,6 +14,7 @@ import {
 import { createIdempotencyMiddleware } from "./middleware/idempotency"
 import { formatAcpError } from "../lib/error-formatters"
 import { computeSessionFingerprint, verifySessionOwnership } from "../lib/session-ownership"
+import { agentSessions } from "../lib/agent-session"
 import { ucpErrorFor, type UcpRequestLike } from "../lib/ucp-version"
 import type { UcpCapability } from "../lib/ucp-wire/types"
 import type { UcpVersionRegistry } from "../lib/ucp-version-registry"
@@ -228,13 +229,8 @@ async function enforceSessionVersionPin(
     return
   }
 
-  const query = req.scope.resolve("query") as any
-  const { data: [cart] } = await query.graph({
-    entity: "cart",
-    fields: ["id", "metadata"],
-    filters: { id },
-  })
-  const pinned = applyUcpSessionPin(ucpRegistry(req), resolution, cart?.metadata?.ucp_version)
+  const session = await agentSessions(req.scope).find(id)
+  const pinned = applyUcpSessionPin(ucpRegistry(req), resolution, session?.ucp_version ?? undefined)
   if (pinned.version !== resolution.version || pinned.rejection) logUcpResolution(req, pinned)
   if (rejectUcpResolution(req, res, pinned)) return
 
@@ -257,42 +253,36 @@ async function verifySessionOwner(
     return
   }
 
+  const isAcp = req.path.startsWith("/acp")
+  const reject = (status: number, code: string, message: string) => {
+    if (isAcp) {
+      res.status(status).json(formatAcpError({
+        type: status >= 500 ? "processing_error" : "invalid_request",
+        code,
+        message,
+        httpStatus: status,
+      }))
+    } else {
+      res.status(status).json(ucpErrorFor(req, { code, content: message }))
+    }
+  }
+
+  let session
   try {
-    const query = req.scope.resolve("query") as any
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata"],
-      filters: { id },
-    })
-
-    if (!cart) {
-      // Let the route handler deal with 404
-      next()
-      return
-    }
-
-    const fingerprint = computeSessionFingerprint(req)
-    if (!verifySessionOwnership(cart.metadata, fingerprint)) {
-      // Determine protocol from path for error formatting
-      const isAcp = req.path.startsWith("/acp")
-      if (isAcp) {
-        res.status(403).json(formatAcpError({
-          type: "invalid_request",
-          code: "session_ownership_mismatch",
-          message: "You do not have permission to modify this checkout session",
-          httpStatus: 403,
-        }))
-      } else {
-        res.status(403).json(ucpErrorFor(req, {
-          code: "session_ownership_mismatch",
-          content: "You do not have permission to modify this checkout session",
-        }))
-      }
-      return
-    }
+    session = await agentSessions(req.scope).find(id)
   } catch {
-    // If we can't verify ownership, allow the request through
-    // (the route handler will deal with invalid IDs)
+    reject(500, "internal_error", "The checkout session could not be verified")
+    return
+  }
+
+  if (!session) {
+    reject(404, "not_found", "Checkout session not found")
+    return
+  }
+
+  if (!verifySessionOwnership(session, computeSessionFingerprint(req))) {
+    reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
+    return
   }
 
   next()

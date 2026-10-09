@@ -1,6 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import updateCheckoutSessionWorkflow from "../../../../workflows/update-checkout-session"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../lib/cart-fields"
+import { fetchSessionCart } from "../../../../lib/agent-session"
 import { ucpAddressToMedusa } from "../../../../lib/address-translator"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
@@ -12,12 +12,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
 
   try {
-    const query = req.scope.resolve("query") as any
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const cart = await fetchSessionCart(req.scope, id)
 
     if (!cart) {
       res.status(404).json(ucpErrorFor(req, {
@@ -105,12 +100,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     })
 
     // Fetch updated cart
-    const query = req.scope.resolve("query") as any
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const cart = await fetchSessionCart(req.scope, id)
 
     if (!cart) {
       res.status(404).json(ucpErrorFor(req, {
@@ -134,11 +124,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     })
 
     // Re-fetch to include any metadata updates from checkout-prepare
-    const { data: [updatedCart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const updatedCart = await fetchSessionCart(req.scope, id)
 
     const shippingOptions = await listShippingOptionsSafe(req.scope, id)
     const session = agenticCommerceService.formatUcpCheckoutSession(

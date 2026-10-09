@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { createRequest, createResponse, createStoreService } from "./helpers/render-wire"
+import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { extractSignedSummary } from "../lib/validate-signed-amount"
 import { paymentSessionDataFor } from "../workflows/steps/setup-payment"
 
@@ -38,27 +39,34 @@ const HANDLER_ID = "xyz.fd.prism_payment"
 const QUOTED_AMOUNT = "1500000"
 const QUOTED_TOTAL = 15
 
-const quotedMetadata = {
-  prism_checkout_data: {
-    preparedAmount: String(QUOTED_TOTAL),
-    preparedCurrency: "usd",
-    acp: {
+const storedQuote = {
+  preparedAmount: String(QUOTED_TOTAL),
+  preparedCurrency: "usd",
+  acp: {
+    id: HANDLER_ID,
+    config: {
+      x402Version: 2,
+      accepts: [{ network: "eip155:84532", asset: "0xasset", amount: QUOTED_AMOUNT, payTo: "0xmerchant" }],
+    },
+  },
+  ucp: {
+    [HANDLER_ID]: [{
       id: HANDLER_ID,
       config: {
         x402Version: 2,
         accepts: [{ network: "eip155:84532", asset: "0xasset", amount: QUOTED_AMOUNT, payTo: "0xmerchant" }],
       },
-    },
-    ucp: {
-      [HANDLER_ID]: [{
-        id: HANDLER_ID,
-        config: {
-          x402Version: 2,
-          accepts: [{ network: "eip155:84532", asset: "0xasset", amount: QUOTED_AMOUNT, payTo: "0xmerchant" }],
-        },
-      }],
-    },
+    }],
   },
+}
+
+function sessionsHolding(quote: unknown) {
+  return fakeAgentSessions([{ cart_id: "cart_1", handler_data: quote === undefined ? {} : { [HANDLER_ID]: quote } }])
+}
+
+function containerFor(services: Record<string, unknown>, quote: unknown) {
+  const all: Record<string, unknown> = { agenticCommerceSession: sessionsHolding(quote), ...services }
+  return { resolve: (name: string) => all[name] }
 }
 
 function signedPayload(value: string) {
@@ -77,15 +85,17 @@ function base64Credential(value: string) {
 
 function setup(
   credential: Record<string, unknown>,
-  { metadata = quotedMetadata as Record<string, unknown>, providerId = "pp_prism_prism" } = {},
+  options: { quote?: unknown; providerId?: string } = {},
 ) {
+  const quote = "quote" in options ? options.quote : storedQuote
+  const providerId = options.providerId ?? "pp_prism_prism"
   const { service } = createStoreService({ version: "2026-04-08" })
   ;(service as any).getPaymentProviderId = () => providerId
-  const cart = { id: "cart_1", items: [], metadata }
-  const query = { graph: vi.fn(async () => ({ data: [cart], metadata: {} })) }
+  const cart = { id: "cart_1", items: [], metadata: {} }
+  const query = { graph: vi.fn(async () => ({ data: [cart] })) }
   completeRun.mockClear()
   const req = {
-    ...createRequest({ agenticCommerce: service, query }, { id: "cart_1" }),
+    ...createRequest({ agenticCommerce: service, query, agenticCommerceSession: sessionsHolding(quote) }, { id: "cart_1" }),
     body: { payment: { instruments: [{ id: "i1", handler_id: HANDLER_ID, type: "x402", credential }] } },
   }
   return { req: req as any, res: createResponse() as any }
@@ -202,11 +212,11 @@ describe("UCP complete without a usable payment quote", () => {
   const authorization = base64Credential(QUOTED_AMOUNT)
 
   it.each([
-    ["a cart that never got a quote", {}],
-    ["a cart whose quote was cleared", { prism_checkout_data: null }],
-    ["a quote holding no UCP accepts", { prism_checkout_data: { preparedAmount: "15", preparedCurrency: "usd", ucp: null } }],
-  ])("rejects %s", async (_label, metadata) => {
-    const { req, res } = setup({ type: "x402", authorization }, { metadata })
+    ["a cart that never got a quote", undefined],
+    ["a cart whose quote was cleared", null],
+    ["a quote holding no UCP accepts", { preparedAmount: "15", preparedCurrency: "usd", ucp: null }],
+  ])("rejects %s", async (_label, quote) => {
+    const { req, res } = setup({ type: "x402", authorization }, { quote })
 
     await ucpComplete(req, res)
 
@@ -215,7 +225,7 @@ describe("UCP complete without a usable payment quote", () => {
   })
 
   it("rejects an unreadable credential on a cart that never got a quote", async () => {
-    const { req, res } = setup({ type: "x402", authorization: "abc" }, { metadata: {} })
+    const { req, res } = setup({ type: "x402", authorization: "abc" }, { quote: undefined })
 
     await ucpComplete(req, res)
 
@@ -224,7 +234,7 @@ describe("UCP complete without a usable payment quote", () => {
   })
 
   it("does not ask a provider without a Prism quote for one", async () => {
-    const { req, res } = setup({ type: "x402", authorization }, { metadata: {}, providerId: "pp_stripe_stripe" })
+    const { req, res } = setup({ type: "x402", authorization }, { quote: undefined, providerId: "pp_stripe_stripe" })
 
     await ucpComplete(req, res)
 
@@ -237,7 +247,7 @@ describe("ACP complete tamper cases", () => {
 
   function acpSetup(
     credentialAuthorization: string,
-    options: { metadata?: Record<string, unknown>; providerId?: string } = {},
+    options: { quote?: unknown; providerId?: string } = {},
   ) {
     const { req, res } = setup({}, options)
     req.validatedBody = {
@@ -247,11 +257,11 @@ describe("ACP complete tamper cases", () => {
   }
 
   it.each([
-    ["a cart that never got a quote", {}],
-    ["a cart whose quote was cleared", { prism_checkout_data: null }],
-    ["a quote holding no ACP accepts", { prism_checkout_data: { preparedAmount: "15", preparedCurrency: "usd", acp: null } }],
-  ])("rejects %s", async (_label, metadata) => {
-    const { req, res } = acpSetup(authorization, { metadata })
+    ["a cart that never got a quote", undefined],
+    ["a cart whose quote was cleared", null],
+    ["a quote holding no ACP accepts", { preparedAmount: "15", preparedCurrency: "usd", acp: null }],
+  ])("rejects %s", async (_label, quote) => {
+    const { req, res } = acpSetup(authorization, { quote })
 
     await acpComplete(req, res)
 
@@ -287,7 +297,7 @@ describe("ACP complete tamper cases", () => {
   })
 
   it("does not ask a provider without a Prism quote for one", async () => {
-    const { req, res } = acpSetup("abc", { metadata: {}, providerId: "pp_stripe_stripe" })
+    const { req, res } = acpSetup("abc", { quote: undefined, providerId: "pp_stripe_stripe" })
 
     await acpComplete(req, res)
 
@@ -296,19 +306,19 @@ describe("ACP complete tamper cases", () => {
 })
 
 describe("payment session data handed to the provider", () => {
-  it("carries the cart's stored quote from server-side metadata", () => {
+  it("carries the cart's stored quote", () => {
     const data = paymentSessionDataFor(
       { ucp_version: "2026-04-08", payment_data: { eip3009_authorization: base64Credential(QUOTED_AMOUNT) } },
-      quotedMetadata,
+      storedQuote,
     )
 
-    expect(data.prism_checkout_data).toEqual(quotedMetadata.prism_checkout_data)
+    expect(data.prism_checkout_data).toEqual(storedQuote)
   })
 
   it("carries no quote when the cart has none, so the provider fails closed", () => {
     const data = paymentSessionDataFor(
       { ucp_version: "2026-04-08", payment_data: { eip3009_authorization: base64Credential(QUOTED_AMOUNT) } },
-      {},
+      undefined,
     )
 
     expect(data).not.toHaveProperty("prism_checkout_data")
@@ -323,12 +333,11 @@ describe("payment session used to complete a UCP checkout", () => {
       id: "cart_1",
       total: QUOTED_TOTAL,
       currency_code: "usd",
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: existingSessions },
       ...cartOverrides,
     }
     const query = { graph: vi.fn(async () => ({ data: [cart] })) }
-    const container = { resolve: () => query }
+    const container = containerFor({ query }, storedQuote)
     paymentFlows.createSessions.mockClear()
     paymentFlows.deleteSessions.mockClear()
 
@@ -356,7 +365,7 @@ describe("payment session used to complete a UCP checkout", () => {
     expect(createdSession()).toMatchObject({
       payment_collection_id: "paycol_1",
       provider_id: "pp_prism_prism",
-      data: { eip3009_authorization: pluginAuthorization, prism_checkout_data: quotedMetadata.prism_checkout_data },
+      data: { eip3009_authorization: pluginAuthorization, prism_checkout_data: storedQuote },
     })
   })
 
@@ -434,7 +443,12 @@ describe("UCP completion against a cart changed after its quote", () => {
   const pluginAuthorization = base64Credential(QUOTED_AMOUNT)
   const grownTotal = QUOTED_TOTAL + 100 * 1500
 
-  async function completeSetup(cart: Record<string, unknown>, paymentProviderId = "pp_prism_prism") {
+  async function completeSetup(
+    cart: Record<string, unknown>,
+    paymentProviderId = "pp_prism_prism",
+    ...override: [quote?: unknown]
+  ) {
+    const quote = override.length ? override[0] : storedQuote
     const query = { graph: vi.fn(async () => ({ data: [{ id: "cart_1", currency_code: "usd", ...cart }] })) }
     paymentFlows.createCollection.mockClear()
     paymentFlows.createSessions.mockClear()
@@ -447,7 +461,7 @@ describe("UCP completion against a cart changed after its quote", () => {
         ucp_version: "2026-04-08",
         payment_data: { eip3009_authorization: pluginAuthorization, x402_version: 2 },
       },
-      { container: { resolve: () => query } },
+      { container: containerFor({ query }, quote) },
     )
   }
 
@@ -459,7 +473,6 @@ describe("UCP completion against a cart changed after its quote", () => {
   it("rejects a cart whose items grew after the quote was signed", async () => {
     await expect(completeSetup({
       total: grownTotal,
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: grownTotal, payment_sessions: [] },
     })).rejects.toThrow(/quote_total_mismatch/)
     expectNothingPrepared()
@@ -468,7 +481,6 @@ describe("UCP completion against a cart changed after its quote", () => {
   it("rejects a cart whose shipping was added after the quote was signed", async () => {
     await expect(completeSetup({
       total: QUOTED_TOTAL + 4.99,
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL + 4.99, payment_sessions: [] },
     })).rejects.toThrow(/quote_total_mismatch/)
     expectNothingPrepared()
@@ -477,7 +489,6 @@ describe("UCP completion against a cart changed after its quote", () => {
   it("rejects a payment collection still holding the quoted amount after the cart grew", async () => {
     await expect(completeSetup({
       total: grownTotal,
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
     })).rejects.toThrow(/payment_amount_mismatch/)
     expectNothingPrepared()
@@ -486,7 +497,6 @@ describe("UCP completion against a cart changed after its quote", () => {
   it("rejects a retried completion whose settled session no longer matches the cart total", async () => {
     await expect(completeSetup({
       total: grownTotal,
-      metadata: quotedMetadata,
       payment_collection: {
         id: "paycol_1",
         amount: grownTotal,
@@ -504,25 +514,22 @@ describe("UCP completion against a cart changed after its quote", () => {
   it("rejects a Prism completion on a cart that carries no quote", async () => {
     await expect(completeSetup({
       total: QUOTED_TOTAL,
-      metadata: {},
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
-    })).rejects.toThrow(/missing_payment_quote/)
+    }, "pp_prism_prism", undefined)).rejects.toThrow(/missing_payment_quote/)
     expectNothingPrepared()
   })
 
   it("rejects a quote that does not say which total it was prepared for", async () => {
-    const { preparedAmount: _dropped, ...unpriced } = quotedMetadata.prism_checkout_data
+    const { preparedAmount: _dropped, ...unpriced } = storedQuote
     await expect(completeSetup({
       total: QUOTED_TOTAL,
-      metadata: { prism_checkout_data: unpriced },
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
-    })).rejects.toThrow(/missing_payment_quote/)
+    }, "pp_prism_prism", unpriced)).rejects.toThrow(/missing_payment_quote/)
     expectNothingPrepared()
   })
 
   it("rejects a cart whose total cannot be read", async () => {
     await expect(completeSetup({
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
     })).rejects.toThrow(/missing_cart_total/)
     expectNothingPrepared()
@@ -532,35 +539,31 @@ describe("UCP completion against a cart changed after its quote", () => {
     await expect(completeSetup({
       total: QUOTED_TOTAL,
       currency_code: "jpy",
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
     })).rejects.toThrow(/quote_currency_mismatch/)
     expectNothingPrepared()
   })
 
   it("rejects a quote that does not say which currency it was prepared in", async () => {
-    const { preparedCurrency: _dropped, ...unpriced } = quotedMetadata.prism_checkout_data
+    const { preparedCurrency: _dropped, ...unpriced } = storedQuote
     await expect(completeSetup({
       total: QUOTED_TOTAL,
-      metadata: { prism_checkout_data: unpriced },
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
-    })).rejects.toThrow(/missing_payment_quote/)
+    }, "pp_prism_prism", unpriced)).rejects.toThrow(/missing_payment_quote/)
     expectNothingPrepared()
   })
 
   it("rejects a stale payment collection for a provider that takes no Prism quote", async () => {
     await expect(completeSetup({
       total: grownTotal,
-      metadata: {},
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
-    }, "pp_stripe_stripe")).rejects.toThrow(/payment_amount_mismatch/)
+    }, "pp_stripe_stripe", undefined)).rejects.toThrow(/payment_amount_mismatch/)
     expectNothingPrepared()
   })
 
   it("prepares the payment when quote, cart total and payment amount agree", async () => {
     await completeSetup({
       total: QUOTED_TOTAL,
-      metadata: quotedMetadata,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
     })
     expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
@@ -569,7 +572,6 @@ describe("UCP completion against a cart changed after its quote", () => {
   it("refuses to pay a cart that holds no payment collection under the lock", async () => {
     await expect(completeSetup({
       total: QUOTED_TOTAL,
-      metadata: quotedMetadata,
       payment_collection: null,
     })).rejects.toThrow(/no payment collection/)
     expect(paymentFlows.createCollection).not.toHaveBeenCalled()
