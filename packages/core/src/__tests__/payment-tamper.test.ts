@@ -30,6 +30,7 @@ vi.mock("@medusajs/framework/workflows-sdk", async (importOriginal) => ({
 
 import { POST as ucpComplete } from "../api/ucp/checkout-sessions/[id]/complete/route"
 import { setupPaymentStep } from "../workflows/steps/setup-payment"
+import { paymentToCapture } from "../lib/payment-to-capture"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const QUOTED_AMOUNT = "1500000"
@@ -255,10 +256,78 @@ describe("payment session used to complete a UCP checkout", () => {
     expect(createdSession().provider_id).toBe("pp_prism_prism")
   })
 
+  it("keeps a session already settled with the same credential so a retried completion does not settle twice", async () => {
+    await runSetup([
+      {
+        id: "payses_settled",
+        status: "authorized",
+        provider_id: "pp_prism_prism",
+        data: { eip3009_authorization: pluginAuthorization, prism_tx_id: "0xsettled" },
+      },
+      { id: "payses_buyer", status: "pending", provider_id: "pp_prism_prism", data: {} },
+    ])
+
+    expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_buyer"] } })
+    expect(paymentFlows.createSessions).not.toHaveBeenCalled()
+  })
+
+  it("replaces an authorized session settled with a different credential", async () => {
+    await runSetup([{
+      id: "payses_other",
+      status: "authorized",
+      provider_id: "pp_prism_prism",
+      data: { eip3009_authorization: base64Credential("1"), prism_tx_id: "0xother" },
+    }])
+
+    expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_other"] } })
+    expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it("replaces an authorized session that names the credential but was never settled", async () => {
+    await runSetup([{
+      id: "payses_unsettled",
+      status: "authorized",
+      provider_id: "pp_prism_prism",
+      data: { eip3009_authorization: pluginAuthorization },
+    }])
+
+    expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_unsettled"] } })
+    expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it("replaces a settled session of another provider", async () => {
+    await runSetup([{
+      id: "payses_system",
+      status: "authorized",
+      provider_id: "pp_system_default",
+      data: { eip3009_authorization: pluginAuthorization, prism_tx_id: "0xsettled" },
+    }])
+
+    expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_system"] } })
+    expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+
   it("creates the session directly when the collection holds none", async () => {
     await runSetup([])
 
     expect(paymentFlows.deleteSessions).not.toHaveBeenCalled()
     expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("payment captured after a UCP completion", () => {
+  const cartWith = (payments: Record<string, unknown>[]) => ({ data: [{ id: "cart_1", payment_collection: { payments } }] })
+
+  it("captures only an open payment of the provider used for this completion", () => {
+    expect(paymentToCapture(cartWith([
+      { id: "pay_system", provider_id: "pp_system_default" },
+      { id: "pay_canceled", provider_id: "pp_prism_prism", canceled_at: "2026-10-09T00:00:00Z" },
+      { id: "pay_captured", provider_id: "pp_prism_prism", captured_at: "2026-10-09T00:00:00Z" },
+      { id: "pay_prism", provider_id: "pp_prism_prism" },
+    ]), "pp_prism_prism")).toBe("pay_prism")
+  })
+
+  it("captures nothing when only other providers hold a payment", () => {
+    expect(paymentToCapture(cartWith([{ id: "pay_system", provider_id: "pp_system_default" }]), "pp_prism_prism")).toBeNull()
   })
 })
