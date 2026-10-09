@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { PaymentHandlerConfig, X402AcceptEntry } from "./prism-client"
-import type { X402PaymentAuthorization } from "../modules/prism-payment/types"
+import type { SettledPayment, X402PaymentAuthorization } from "../modules/prism-payment/types"
 
 export type QuotedRequirements = X402AcceptEntry & { amount: string }
 
@@ -27,6 +27,22 @@ export type QuoteBindingError =
   | "authorization_expired"
   | "authorization_not_yet_valid"
   | "invalid_nonce"
+
+export type SettlementError = "missing_transaction_hash" | "settled_network_mismatch" | "settled_amount_mismatch"
+
+type SessionQuoteError = "missing_payment_quote" | "invalid_quote_signature" | "quote_total_mismatch" | "quote_currency_mismatch"
+
+export type SettledPaymentMismatch = SessionQuoteError | SettlementError | "settled_payment_not_quoted"
+
+export type ReportedSettlement = {
+  transaction?: string
+  network?: string
+  amount?: unknown
+}
+
+export type SettlementReconciliation =
+  | { ok: true; settled: SettledPayment }
+  | { ok: false; error: SettlementError }
 
 export type QuoteBinding =
   | { ok: true; x402Version: number; requirements: QuotedRequirements; paymentPayload: Record<string, unknown> }
@@ -79,11 +95,9 @@ export function bindAuthorizationToQuote(
   signingKey: string,
   allowedChains?: readonly string[],
 ): QuoteBinding {
-  const quote = asStoredQuote(storedQuote)
-  if (!quote) return fail("missing_payment_quote")
-  if (!signatureMatches(quote, signingKey)) return fail("invalid_quote_signature")
-  if (!sameDecimal(quote.preparedAmount, sessionAmount)) return fail("quote_total_mismatch")
-  if (!sameCurrency(quote.preparedCurrency, sessionCurrency)) return fail("quote_currency_mismatch")
+  const checked = quoteForSession(storedQuote, sessionAmount, sessionCurrency, signingKey)
+  if (!checked.ok) return fail(checked.error)
+  const quote = checked.quote
 
   const signed = authorization.paymentPayload?.payload?.authorization
   if (!signed || !allNonEmpty(authorization.paymentPayload?.payload?.signature, signed.from, signed.to, signed.value, signed.validAfter, signed.validBefore, signed.nonce)) {
@@ -102,6 +116,57 @@ export function bindAuthorizationToQuote(
   if (!BYTES32_HEX.test(signed.nonce)) return fail("invalid_nonce")
 
   return { ok: true, x402Version: quote.x402Version, requirements, paymentPayload: quotedPayload(authorization, quote, requirements) }
+}
+
+export function reconcileSettlement(requirements: QuotedRequirements, reported: ReportedSettlement): SettlementReconciliation {
+  if (!allNonEmpty(reported.transaction)) return { ok: false, error: "missing_transaction_hash" }
+  if (reported.network !== undefined && chainKey(reported.network) !== chainKey(requirements.network)) {
+    return { ok: false, error: "settled_network_mismatch" }
+  }
+  if (reported.amount !== undefined && !sameReportedAtomicValue(requirements.amount, reported.amount)) {
+    return { ok: false, error: "settled_amount_mismatch" }
+  }
+  return {
+    ok: true,
+    settled: {
+      transaction: reported.transaction as string,
+      network: requirements.network,
+      asset: requirements.asset,
+      amount: requirements.amount,
+    },
+  }
+}
+
+export function settledPaymentMismatch(sessionData: Record<string, unknown>, signingKey: string): SettledPaymentMismatch | null {
+  const checked = quoteForSession(sessionData.payment_quote, sessionData.amount, sessionData.currency_code, signingKey)
+  if (!checked.ok) return checked.error
+  if (!allNonEmpty(sessionData.prism_tx_id)) return "missing_transaction_hash"
+
+  const { transaction_network: network, settled_asset: asset, settled_amount: amount } = sessionData
+  const quoted = allNonEmpty(network, asset)
+    ? checked.quote.accepts.find((entry) => chainKey(entry.network) === chainKey(network as string) && sameAddress(entry.asset, asset as string))
+    : undefined
+  if (!quoted) return "settled_payment_not_quoted"
+  return typeof amount === "string" && sameAtomicValue(quoted.amount, amount) ? null : "settled_amount_mismatch"
+}
+
+function quoteForSession(
+  storedQuote: unknown,
+  sessionAmount: unknown,
+  sessionCurrency: unknown,
+  signingKey: string,
+): { ok: true; quote: StoredQuote } | { ok: false; error: SessionQuoteError } {
+  const quote = asStoredQuote(storedQuote)
+  if (!quote) return { ok: false, error: "missing_payment_quote" }
+  if (!signatureMatches(quote, signingKey)) return { ok: false, error: "invalid_quote_signature" }
+  if (!sameDecimal(quote.preparedAmount, sessionAmount)) return { ok: false, error: "quote_total_mismatch" }
+  if (!sameCurrency(quote.preparedCurrency, sessionCurrency)) return { ok: false, error: "quote_currency_mismatch" }
+  return { ok: true, quote }
+}
+
+function sameReportedAtomicValue(expected: string, reported: unknown): boolean {
+  if (typeof reported === "string") return sameAtomicValue(expected, reported)
+  return typeof reported === "number" && Number.isSafeInteger(reported) && reported >= 0 && sameAtomicValue(expected, String(reported))
 }
 
 function declaredRequirements(authorization: X402PaymentAuthorization): Record<string, unknown> | null {
@@ -161,7 +226,7 @@ function quoteTermsFromCheckoutData(checkoutData: unknown): QuoteTerms | null {
   })
 }
 
-function asStoredQuote(value: unknown): StoredQuote | null {
+export function asStoredQuote(value: unknown): StoredQuote | null {
   const terms = asQuoteTerms(value)
   if (!terms || !isRecord(value) || !allNonEmpty(value.signature)) return null
   return { ...terms, signature: value.signature as string }

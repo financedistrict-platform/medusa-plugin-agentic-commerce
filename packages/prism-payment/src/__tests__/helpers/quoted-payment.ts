@@ -19,6 +19,8 @@ export const quotedEntry = {
 
 export const QUOTE_SIGNING_KEY = "key"
 
+export const settledPayment = { transaction: "0xtx", network: NETWORK, asset: ASSET, amount: QUOTED_VALUE }
+
 export function unsignedCheckoutData(accepts: Record<string, unknown>[] = [quotedEntry]) {
   return {
     ucp: { "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", config: { x402Version: 2, resource: { url: "https://shop.test/ucp/checkout-sessions/cart_1" }, accepts } }] },
