@@ -22,7 +22,7 @@ function cacheModule() {
 
 function harness() {
   const cache = cacheModule()
-  const service = new AgenticCommerceService({}, {})
+  const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism" })
   const services: Record<string, unknown> = { [Modules.CACHE]: cache, agenticCommerce: service }
   const middleware = createIdempotencyMiddleware({ required: true, protocol: "ucp" })
   let executions = 0

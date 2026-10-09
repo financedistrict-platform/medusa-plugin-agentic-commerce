@@ -55,6 +55,7 @@ export default defineConfig({
         storefront_url: process.env.STOREFRONT_URL || "https://your-store.com",
         store_name: "Your Store Name",
         store_description: "What your store sells",
+        payment_provider_id: "pp_prism_prism",
         // Reference payment handler adapter module keys (see Payment Handlers)
         payment_handler_adapters: ["prismPaymentHandler"],
       },
@@ -68,6 +69,7 @@ export default defineConfig({
 ```bash
 # Required
 AGENTIC_COMMERCE_API_KEY=your-secret-api-key
+AGENTIC_PAYMENT_PROVIDER=pp_prism_prism
 
 # Optional
 AGENTIC_COMMERCE_SIGNATURE_KEY=your-hmac-secret
@@ -237,6 +239,7 @@ modules: [
     resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agentic-commerce",
     options: {
       payment_handler_adapters: ["myPaymentHandler"],
+      payment_provider_id: "pp_my_provider",
       // ...
     },
   },
@@ -301,14 +304,17 @@ import {
 | `storefront_url` | `string` | `"http://localhost:8000"` | Public URL of your storefront |
 | `store_name` | `string` | `"My Store"` | Store name in protocol responses |
 | `store_description` | `string` | `""` | Store description for discovery |
-| `payment_provider_id` | `string` | `"pp_system_default"` | Medusa payment provider ID |
+| `payment_provider_id` | `string` | required | Medusa payment provider that settles agent payments, for example `"pp_prism_prism"` |
+| `allow_system_payment_provider` | `boolean` | `false` | Allows `pp_system_default` for local testing. It approves every payment, so it also needs `NODE_ENV` `development` or `test` and no `payment_handler_adapters` |
 | `payment_handler_adapters` | `string[]` | `[]` | Module keys of payment handler adapters |
 | `ucp_version` | `string` | latest (`"2026-08-25"`) | Current UCP version, served when the agent declares none. Set `"2026-04-08"` to keep the root profile of 0.x releases |
 | `ucp_supported_versions` | `string[]` | every known version except `ucp_version` | Further UCP versions served on request; the current version is removed from this list |
 | `ucp_version_negotiation` | `"lenient" \| "strict"` | `"lenient"` | How an unusable agent profile is handled (see UCP above) |
 | `acp_version` | `string` | `"2026-01-30"` | ACP protocol version to advertise |
 
-An unknown version or negotiation value stops the store at boot.
+An unknown version or negotiation value stops the store at boot. So does a missing `payment_provider_id`, or the system provider outside the local-testing case above.
+
+Point `payment_provider_id` only at a provider that verifies the agent's credential before it approves a payment. In production, also remove `pp_system_default` from every region: Medusa's own store routes can still complete a cart with any provider enabled on its region.
 
 ### Environment Variables
 
