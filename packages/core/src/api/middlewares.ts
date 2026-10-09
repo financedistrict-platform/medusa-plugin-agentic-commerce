@@ -156,6 +156,18 @@ async function validateUcpRequest(
     }
   }
 
+  const apiKeyHeader = req.headers["x-api-key"]
+  if (typeof apiKeyHeader === "string" && apiKeyHeader.trim()) {
+    const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
+    if (!agenticCommerceService.validateApiKey(apiKeyHeader.trim())) {
+      res.status(401).json(ucpErrorFor(req, {
+        code: "unauthorized",
+        content: "Invalid API key",
+      }))
+      return
+    }
+  }
+
   next()
 }
 
