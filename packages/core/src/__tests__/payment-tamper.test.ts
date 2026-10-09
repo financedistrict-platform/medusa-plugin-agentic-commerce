@@ -56,9 +56,13 @@ function setup(credential: Record<string, unknown>) {
   return { req: req as any, res: createResponse() as any }
 }
 
-function settledSummary() {
+function settledAuthorization() {
   const input = (completeRun.mock.calls[0] as unknown as [{ input: { payment_data: { eip3009_authorization: string } } }])[0]
-  return extractSignedSummary(input.input.payment_data.eip3009_authorization)
+  return input.input.payment_data.eip3009_authorization
+}
+
+function settledSummary() {
+  return extractSignedSummary(settledAuthorization())
 }
 
 describe("UCP complete tamper cases", () => {
@@ -103,21 +107,58 @@ describe("UCP complete tamper cases", () => {
     expect(res.statusCode).toBe(422)
   })
 
+  it("rejects an authorization that wraps another base64 authorization", async () => {
+    const nested = Buffer.from(JSON.stringify({ authorization: base64Credential(QUOTED_AMOUNT) })).toString("base64")
+    const { req, res } = setup({ type: "x402", authorization: nested })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("rejects an authorization holding a flat payload without the paymentPayload wrapper", async () => {
+    const flat = Buffer.from(JSON.stringify({ x402Version: 2, ...signedPayload(QUOTED_AMOUNT) })).toString("base64")
+    const { req, res } = setup({ type: "x402", authorization: flat })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it.each([
+    ["hex", "0x16e360"],
+    ["plus-prefixed", "+1500000"],
+    ["padded", " 1500000"],
+  ])("rejects a %s signed value even when it equals the quote numerically", async (_label, value) => {
+    const { req, res } = setup({ type: "x402", authorization: base64Credential(value) })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
   it("settles exactly the payload the amount check approved", async () => {
-    const { req, res } = setup({ type: "x402", x402Version: 2, paymentPayload: signedPayload(QUOTED_AMOUNT) })
+    const credential = { type: "x402", x402Version: 2, paymentPayload: signedPayload(QUOTED_AMOUNT) }
+    const { req, res } = setup(credential)
 
     await ucpComplete(req, res)
 
     expect(completeRun).toHaveBeenCalledTimes(1)
     expect(settledSummary()).toMatchObject({ value: QUOTED_AMOUNT, to: "0xMerchant", network: "eip155:84532" })
+    expect(JSON.parse(Buffer.from(settledAuthorization(), "base64").toString("utf-8"))).toEqual(credential)
   })
 
   it("settles exactly the authorization the amount check approved", async () => {
-    const { req, res } = setup({ type: "x402", authorization: base64Credential(QUOTED_AMOUNT) })
+    const authorization = base64Credential(QUOTED_AMOUNT)
+    const { req, res } = setup({ type: "x402", authorization })
 
     await ucpComplete(req, res)
 
     expect(completeRun).toHaveBeenCalledTimes(1)
     expect(settledSummary()).toMatchObject({ value: QUOTED_AMOUNT })
+    expect(settledAuthorization()).toBe(authorization)
   })
 })

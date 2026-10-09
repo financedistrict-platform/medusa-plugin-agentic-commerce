@@ -7,6 +7,8 @@ import {
 } from "../lib/ucp-complete-guard"
 import { extractSignedSummary } from "../lib/validate-signed-amount"
 
+const toBase64 = (credential: unknown) => Buffer.from(JSON.stringify(credential)).toString("base64")
+
 const HANDLER_ID = "xyz.fd.prism_payment"
 
 const credential = {
@@ -62,26 +64,26 @@ describe("checkPrismInstrument", () => {
 
 describe("checkQuoteBinding", () => {
   it("passes when the signed payment matches the stored quote", () => {
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(credential))).toBeNull()
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(credential)))).toBeNull()
   })
 
   it("skips carts without a Prism quote", () => {
-    expect(checkQuoteBinding({}, HANDLER_ID, extractSignedSummary(credential))).toBeNull()
-    expect(checkQuoteBinding(undefined, undefined, extractSignedSummary(credential))).toBeNull()
+    expect(checkQuoteBinding({}, HANDLER_ID, extractSignedSummary(toBase64(credential)))).toBeNull()
+    expect(checkQuoteBinding(undefined, undefined, extractSignedSummary(toBase64(credential)))).toBeNull()
   })
 
   it("rejects when the quote exists but the handler_id finds no stored accepts", () => {
-    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", extractSignedSummary(credential)))
+    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", extractSignedSummary(toBase64(credential))))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but holds no UCP accepts", () => {
-    expect(checkQuoteBinding({ prism_checkout_data: { ucp: null } }, HANDLER_ID, extractSignedSummary(credential)))
+    expect(checkQuoteBinding({ prism_checkout_data: { ucp: null } }, HANDLER_ID, extractSignedSummary(toBase64(credential))))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but the credential cannot be read", () => {
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary({ type: "x402" })))
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64({ type: "x402" }))))
       .toMatchObject({ status: 422, code: "invalid_credential" })
   })
 
@@ -93,7 +95,7 @@ describe("checkQuoteBinding", () => {
         payload: { authorization: { value: "1", to: "0xMerchant" } },
       },
     }
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(tampered)))
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(toBase64(tampered))))
       .toMatchObject({ status: 422, code: "amount_mismatch" })
   })
 })
