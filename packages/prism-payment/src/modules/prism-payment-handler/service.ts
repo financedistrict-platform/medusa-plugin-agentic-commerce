@@ -10,6 +10,7 @@ import {
 } from "../../lib/prism-client"
 import { PRISM_HANDLER_ID } from "../prism-payment/types"
 import { hasValidQuoteSignature, paymentConfigFromCheckoutData, quoteSignatureFor } from "../../lib/quote-binding"
+import { decimalAmount } from "../../lib/decimal-amount"
 
 export const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
 
@@ -58,17 +59,21 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   async prepareCheckoutPayment(input: CheckoutPrepareInput): Promise<PrismCheckoutData | null> {
     const { cart, checkoutBaseUrl, storeName, ucpVersion } = input
 
-    const totalMajor = cart.total ?? cart.raw_total?.value ?? 0
+    const totalMajor = cart.total ?? cart.raw_total?.value
     const currency = (cart.currency_code || "eur").toUpperCase()
     const preparedCurrency = currency.toLowerCase()
-    const amount = String(Number(totalMajor))
+    const amount = decimalAmount(totalMajor)
+    if (amount === null) {
+      console.error(`[prism-payment-handler] Cart ${cart.id} has no total that can be quoted`)
+      return null
+    }
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
     const existing = input.stored as PrismCheckoutData | undefined
     if (
       existing &&
       existing.preparedResourceUrl === resourceUrl &&
-      existing.preparedAmount === amount &&
+      decimalAmount(existing.preparedAmount) === amount &&
       existing.preparedCurrency === preparedCurrency &&
       (existing.ucp || existing.acp) &&
       hasValidQuoteSignature(existing, this.client.getApiKey())

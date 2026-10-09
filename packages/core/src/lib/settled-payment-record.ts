@@ -1,3 +1,5 @@
+import { decimalAmount } from "./decimal-amount"
+
 type PaymentSessionLike = { status?: unknown; data?: Record<string, unknown> | null }
 
 type CompletedCart = {
@@ -21,12 +23,12 @@ export function settledPaymentMetadata(cart: CompletedCart, paymentMethod: strin
   const data = settledSessionData(cart)
   const transaction = text(data.prism_tx_id) ?? text(data.transaction_reference)
   const settledValue = text(data.settled_amount)
-  const total = Number(cart.total)
-  const settled = transaction !== null && settledValue !== null && cart.total != null && Number.isFinite(total)
+  const total = decimalAmount(cart.total)
+  const settled = transaction !== null && settledValue !== null && total !== null
 
   return {
     payment_method: paymentMethod,
-    payment_amount: settled ? String(total) : null,
+    payment_amount: settled ? total : null,
     payment_currency: text(cart.currency_code),
     payment_settled_value: settledValue,
     payment_settled_asset: text(data.settled_asset),

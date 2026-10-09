@@ -1,4 +1,5 @@
 import { isPrismProvider } from "./ucp-complete-guard"
+import { decimalAmount } from "./decimal-amount"
 
 export const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
 
@@ -24,7 +25,7 @@ export function checkoutTotalMismatch({
   paymentCollectionAmount,
   storedQuote,
 }: CheckoutTotals): CheckoutTotalMismatch | null {
-  if (amountOf(cartTotal) === null) return "missing_cart_total"
+  if (decimalAmount(cartTotal) === null) return "missing_cart_total"
   if (!sameAmount(paymentCollectionAmount, cartTotal)) return "payment_amount_mismatch"
   if (!isPrismProvider(paymentProviderId)) return null
 
@@ -44,16 +45,8 @@ function sameCurrency(a: unknown, b: unknown): boolean {
 }
 
 function sameAmount(a: unknown, b: unknown): boolean {
-  const left = amountOf(a)
-  const right = amountOf(b)
-  return left !== null && right !== null && left === right
-}
-
-function amountOf(value: unknown): number | null {
-  if (typeof value === "string" && value.trim() === "") return null
-  if (typeof value !== "number" && typeof value !== "string" && !isRecord(value)) return null
-  const amount = Number(value)
-  return Number.isFinite(amount) ? amount : null
+  const left = decimalAmount(a)
+  return left !== null && left === decimalAmount(b)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

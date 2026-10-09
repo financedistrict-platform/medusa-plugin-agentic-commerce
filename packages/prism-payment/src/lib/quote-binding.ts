@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { isSupportedX402Version, type PaymentHandlerConfig, type X402AcceptEntry } from "./prism-client"
 import type { SettledPayment, X402PaymentAuthorization } from "../modules/prism-payment/types"
+import { decimalAmount } from "./decimal-amount"
 
 export type QuotedRequirements = X402AcceptEntry & { amount: string }
 
@@ -289,10 +290,8 @@ function isPaymentHandlerConfig(value: unknown): value is PaymentHandlerConfig {
 }
 
 function sameDecimal(a: unknown, b: unknown): boolean {
-  if (!allNonEmpty(String(a ?? "")) || !allNonEmpty(String(b ?? ""))) return false
-  const left = Number(a)
-  const right = Number(b)
-  return Number.isFinite(left) && Number.isFinite(right) && left === right
+  const left = decimalAmount(a)
+  return left !== null && left === decimalAmount(b)
 }
 
 function sameCurrency(a: unknown, b: unknown): boolean {
