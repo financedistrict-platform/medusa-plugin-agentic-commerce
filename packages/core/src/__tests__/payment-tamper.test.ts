@@ -35,9 +35,11 @@ import AgenticCommerceService from "../modules/agentic-commerce/service"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const QUOTED_AMOUNT = "1500000"
+const QUOTED_TOTAL = 15
 
 const quotedMetadata = {
   prism_checkout_data: {
+    preparedAmount: String(QUOTED_TOTAL),
     ucp: {
       [HANDLER_ID]: [{
         id: HANDLER_ID,
@@ -207,11 +209,13 @@ describe("payment session data handed to the provider", () => {
 describe("payment session used to complete a UCP checkout", () => {
   const pluginAuthorization = base64Credential(QUOTED_AMOUNT)
 
-  async function runSetup(existingSessions: Record<string, unknown>[]) {
+  async function runSetup(existingSessions: Record<string, unknown>[], cartOverrides: Record<string, unknown> = {}) {
     const cart = {
       id: "cart_1",
+      total: QUOTED_TOTAL,
       metadata: quotedMetadata,
-      payment_collection: { id: "paycol_1", payment_sessions: existingSessions },
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: existingSessions },
+      ...cartOverrides,
     }
     const query = { graph: vi.fn(async () => ({ data: [cart] })) }
     const container = { resolve: () => query }
@@ -313,6 +317,135 @@ describe("payment session used to complete a UCP checkout", () => {
 
     expect(paymentFlows.deleteSessions).not.toHaveBeenCalled()
     expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("UCP completion against a cart changed after its quote", () => {
+  const pluginAuthorization = base64Credential(QUOTED_AMOUNT)
+  const grownTotal = QUOTED_TOTAL + 100 * 1500
+
+  async function completeSetup(cart: Record<string, unknown>, paymentProviderId = "pp_prism_prism", afterCollectionCreated = cart) {
+    const graph = vi.fn(async () => ({ data: [{ id: "cart_1", ...afterCollectionCreated }] }))
+    graph.mockImplementationOnce(async () => ({ data: [{ id: "cart_1", ...cart }] }))
+    const query = { graph }
+    paymentFlows.createCollection.mockClear()
+    paymentFlows.createSessions.mockClear()
+    paymentFlows.deleteSessions.mockClear()
+
+    return (setupPaymentStep as unknown as (input: unknown, ctx: unknown) => Promise<unknown>)(
+      {
+        cart_id: "cart_1",
+        payment_provider_id: paymentProviderId,
+        ucp_version: "2026-04-08",
+        payment_data: { eip3009_authorization: pluginAuthorization, x402_version: 2 },
+      },
+      { container: { resolve: () => query } },
+    )
+  }
+
+  function expectNothingPrepared() {
+    expect(paymentFlows.deleteSessions).not.toHaveBeenCalled()
+    expect(paymentFlows.createSessions).not.toHaveBeenCalled()
+  }
+
+  it("rejects a cart whose items grew after the quote was signed", async () => {
+    await expect(completeSetup({
+      total: grownTotal,
+      metadata: quotedMetadata,
+      payment_collection: { id: "paycol_1", amount: grownTotal, payment_sessions: [] },
+    })).rejects.toThrow(/quote_total_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a cart whose shipping was added after the quote was signed", async () => {
+    await expect(completeSetup({
+      total: QUOTED_TOTAL + 4.99,
+      metadata: quotedMetadata,
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL + 4.99, payment_sessions: [] },
+    })).rejects.toThrow(/quote_total_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a payment collection still holding the quoted amount after the cart grew", async () => {
+    await expect(completeSetup({
+      total: grownTotal,
+      metadata: quotedMetadata,
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    })).rejects.toThrow(/payment_amount_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a retried completion whose settled session no longer matches the cart total", async () => {
+    await expect(completeSetup({
+      total: grownTotal,
+      metadata: quotedMetadata,
+      payment_collection: {
+        id: "paycol_1",
+        amount: grownTotal,
+        payment_sessions: [{
+          id: "payses_settled",
+          status: "authorized",
+          provider_id: "pp_prism_prism",
+          data: { eip3009_authorization: pluginAuthorization, prism_tx_id: "0xsettled" },
+        }],
+      },
+    })).rejects.toThrow(/quote_total_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a Prism completion on a cart that carries no quote", async () => {
+    await expect(completeSetup({
+      total: QUOTED_TOTAL,
+      metadata: {},
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    })).rejects.toThrow(/missing_payment_quote/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a quote that does not say which total it was prepared for", async () => {
+    const { preparedAmount: _dropped, ...unpriced } = quotedMetadata.prism_checkout_data
+    await expect(completeSetup({
+      total: QUOTED_TOTAL,
+      metadata: { prism_checkout_data: unpriced },
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    })).rejects.toThrow(/missing_payment_quote/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a cart whose total cannot be read", async () => {
+    await expect(completeSetup({
+      metadata: quotedMetadata,
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    })).rejects.toThrow(/payment_amount_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a stale payment collection for a provider that takes no Prism quote", async () => {
+    await expect(completeSetup({
+      total: grownTotal,
+      metadata: {},
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    }, "pp_stripe_stripe")).rejects.toThrow(/payment_amount_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("prepares the payment when quote, cart total and payment amount agree", async () => {
+    await completeSetup({
+      total: QUOTED_TOTAL,
+      metadata: quotedMetadata,
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    })
+    expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it("checks the amount of a payment collection created during completion", async () => {
+    await expect(completeSetup(
+      { total: QUOTED_TOTAL, metadata: quotedMetadata, payment_collection: null },
+      "pp_prism_prism",
+      { total: QUOTED_TOTAL, metadata: quotedMetadata, payment_collection: { id: "paycol_1", amount: 1 } },
+    )).rejects.toThrow(/payment_amount_mismatch/)
+    expect(paymentFlows.createCollection).toHaveBeenCalledTimes(1)
+    expectNothingPrepared()
   })
 })
 
