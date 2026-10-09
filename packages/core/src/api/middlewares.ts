@@ -13,8 +13,8 @@ import {
 } from "./validation-schemas"
 import { createIdempotencyMiddleware } from "./middleware/idempotency"
 import { formatAcpError } from "../lib/error-formatters"
-import { computeSessionFingerprint, verifySessionOwnership } from "../lib/session-ownership"
-import { agentSessions } from "../lib/agent-session"
+import { computeSessionFingerprint, verifySessionOwnership, type SessionProtocol } from "../lib/session-ownership"
+import { agentSessions, findSessionOfOrder } from "../lib/agent-session"
 import { ucpErrorFor, type UcpRequestLike } from "../lib/ucp-version"
 import type { UcpCapability } from "../lib/ucp-wire/types"
 import type { UcpVersionRegistry } from "../lib/ucp-version-registry"
@@ -242,20 +242,9 @@ async function enforceSessionVersionPin(
 // Verifies that the caller's fingerprint matches the session creator's fingerprint.
 // Prevents agent A from modifying agent B's checkout session.
 
-async function verifySessionOwner(
-  req: MedusaRequest,
-  res: MedusaResponse,
-  next: MedusaNextFunction
-) {
-  const { id } = req.params
-  if (!id) {
-    next()
-    return
-  }
-
-  const isAcp = req.path.startsWith("/acp")
-  const reject = (status: number, code: string, message: string) => {
-    if (isAcp) {
+function ownershipRejecter(protocol: SessionProtocol, req: MedusaRequest, res: MedusaResponse) {
+  return (status: number, code: string, message: string) => {
+    if (protocol === "acp") {
       res.status(status).json(formatAcpError({
         type: status >= 500 ? "processing_error" : "invalid_request",
         code,
@@ -266,26 +255,71 @@ async function verifySessionOwner(
       res.status(status).json(ucpErrorFor(req, { code, content: message }))
     }
   }
+}
 
-  let session
-  try {
-    session = await agentSessions(req.scope).find(id)
-  } catch {
-    reject(500, "internal_error", "The checkout session could not be verified")
-    return
+function verifySessionOwner(protocol: SessionProtocol) {
+  return async function sessionOwnerGuard(
+    req: MedusaRequest,
+    res: MedusaResponse,
+    next: MedusaNextFunction
+  ) {
+    const { id } = req.params
+    if (!id) {
+      next()
+      return
+    }
+
+    const reject = ownershipRejecter(protocol, req, res)
+
+    let session
+    try {
+      session = await agentSessions(req.scope).find(id)
+    } catch {
+      reject(500, "internal_error", "The checkout session could not be verified")
+      return
+    }
+
+    if (!session) {
+      reject(404, "not_found", "Checkout session not found")
+      return
+    }
+
+    if (!verifySessionOwnership(session, computeSessionFingerprint(protocol, req.headers))) {
+      reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
+      return
+    }
+
+    next()
   }
+}
 
-  if (!session) {
-    reject(404, "not_found", "Checkout session not found")
-    return
+function verifyOrderOwner(protocol: SessionProtocol) {
+  return async function orderOwnerGuard(
+    req: MedusaRequest,
+    res: MedusaResponse,
+    next: MedusaNextFunction
+  ) {
+    const reject = ownershipRejecter(protocol, req, res)
+    const { id } = req.params
+
+    let owned = false
+    try {
+      if (id) {
+        const session = await findSessionOfOrder(req.scope, id)
+        owned = verifySessionOwnership(session, computeSessionFingerprint(protocol, req.headers))
+      }
+    } catch {
+      reject(500, "internal_error", "The order could not be verified")
+      return
+    }
+
+    if (!owned) {
+      reject(404, "not_found", "Order not found")
+      return
+    }
+
+    next()
   }
-
-  if (!verifySessionOwnership(session, computeSessionFingerprint(req))) {
-    reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
-    return
-  }
-
-  next()
 }
 
 // --- Adapter Resolution Middleware ---
@@ -383,15 +417,20 @@ export default defineMiddlewares({
     // --- ACP Session Ownership ---
     {
       matcher: "/acp/checkout_sessions/:id",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner("acp")],
     },
     {
       matcher: "/acp/checkout_sessions/:id/complete",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner("acp")],
     },
     {
       matcher: "/acp/checkout_sessions/:id/cancel",
-      middlewares: [verifySessionOwner],
+      middlewares: [verifySessionOwner("acp")],
+    },
+
+    {
+      matcher: "/acp/orders/:id",
+      middlewares: [verifyOrderOwner("acp")],
     },
 
     // --- ACP Idempotency (required on all POSTs) ---
@@ -439,23 +478,28 @@ export default defineMiddlewares({
     // --- UCP Session Ownership ---
     {
       matcher: "/ucp/checkout-sessions/:id",
-      middlewares: [verifySessionOwner, enforceSessionVersionPin],
+      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/checkout-sessions/:id/complete",
-      middlewares: [verifySessionOwner, enforceSessionVersionPin],
+      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/checkout-sessions/:id/cancel",
-      middlewares: [verifySessionOwner, enforceSessionVersionPin],
+      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/carts/:id",
-      middlewares: [verifySessionOwner, enforceSessionVersionPin],
+      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
     },
     {
       matcher: "/ucp/carts/:id/cancel",
-      middlewares: [verifySessionOwner, enforceSessionVersionPin],
+      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
+    },
+
+    {
+      matcher: "/ucp/orders/:id",
+      middlewares: [verifyOrderOwner("ucp")],
     },
 
     // --- UCP Idempotency (required on POST/PUT) ---

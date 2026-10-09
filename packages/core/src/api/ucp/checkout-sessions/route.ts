@@ -3,7 +3,7 @@ import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-se
 import { fetchSessionCart } from "../../../lib/agent-session"
 import { ucpAddressToMedusa } from "../../../lib/address-translator"
 import { getPublicBaseUrl } from "../../../lib/public-url"
-import { computeSessionFingerprint } from "../../../lib/session-ownership"
+import { issueUcpSessionSecret, UCP_SESSION_SECRET_HEADER } from "../../../lib/session-ownership"
 import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../lib/list-shipping-options"
 import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
@@ -51,6 +51,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     const agentIdentifier = req.headers["ucp-agent"] as string | undefined
+    const sessionSecret = issueUcpSessionSecret()
 
     const { result: cart } = await createCheckoutSessionWorkflow(req.scope).run({
       input: {
@@ -63,7 +64,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         agent_identifier: agentIdentifier,
         protocol_version: ucpVersionFor(req),
         ucp_version: (req as UcpRequestLike).ucp?.outcome === "matched" ? ucpVersionFor(req) : undefined,
-        session_fingerprint: computeSessionFingerprint(req),
+        session_fingerprint: sessionSecret.fingerprint,
       },
     })
 
@@ -94,6 +95,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       ucpVersionFor(req),
     )
 
+    res.set(UCP_SESSION_SECRET_HEADER, sessionSecret.secret)
     res.status(201).json(session)
   } catch (error: any) {
     const msg: string = error?.message || ""
