@@ -122,6 +122,10 @@ export class PrismClient {
     return this.apiUrl
   }
 
+  getApiKey(): string {
+    return this.apiKey
+  }
+
   async preparePayment(input: PreparePaymentInput): Promise<PaymentHandlerConfig> {
     if (!this.apiKey) {
       throw new Error("No PRISM_API_KEY configured")

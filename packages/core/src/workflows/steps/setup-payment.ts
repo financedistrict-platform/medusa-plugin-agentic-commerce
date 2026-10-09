@@ -5,6 +5,8 @@ import {
   createPaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
 
+const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
+
 type SetupPaymentInput = {
   cart_id: string
   payment_provider_id: string
@@ -22,6 +24,34 @@ type SetupPaymentInput = {
   }
 }
 
+export function paymentSessionDataFor(
+  input: Pick<SetupPaymentInput, "ucp_version" | "payment_data">,
+  cartMetadata: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const sessionData: Record<string, unknown> = { ucp_version: input.ucp_version }
+
+  if (input.payment_data?.eip3009_authorization) {
+    sessionData.eip3009_authorization = input.payment_data.eip3009_authorization
+    if (input.payment_data.x402_version) {
+      sessionData.x402_version = input.payment_data.x402_version
+    }
+    if (input.payment_data.instrument_type) {
+      sessionData.instrument_type = input.payment_data.instrument_type
+    }
+  }
+
+  if (input.payment_data?.token && !input.payment_data?.eip3009_authorization) {
+    sessionData.shared_payment_token = input.payment_data.token
+  }
+
+  const storedQuote = cartMetadata?.[PRISM_CHECKOUT_DATA_KEY]
+  if (storedQuote) {
+    sessionData[PRISM_CHECKOUT_DATA_KEY] = storedQuote
+  }
+
+  return sessionData
+}
+
 export const setupPaymentStep = createStep(
   "setup-payment",
   async (input: SetupPaymentInput, { container }) => {
@@ -32,6 +62,7 @@ export const setupPaymentStep = createStep(
       entity: "cart",
       fields: [
         "id",
+        "metadata",
         "payment_collection.id",
         "payment_collection.payment_sessions.*",
       ],
@@ -70,32 +101,11 @@ export const setupPaymentStep = createStep(
     )
 
     if (!hasActiveSession) {
-      // Create payment session with the configured provider
-      const sessionData: Record<string, unknown> = { ucp_version: input.ucp_version }
-
-      // Pass EIP-3009 authorization to the payment provider
-      // The provider receives this in its initiatePayment() and stores it in session data,
-      // then receives it again in authorizePayment() during cart completion
-      if (input.payment_data?.eip3009_authorization) {
-        sessionData.eip3009_authorization = input.payment_data.eip3009_authorization
-        if (input.payment_data.x402_version) {
-          sessionData.x402_version = input.payment_data.x402_version
-        }
-        if (input.payment_data.instrument_type) {
-          sessionData.instrument_type = input.payment_data.instrument_type
-        }
-      }
-
-      // Legacy: pass flat token for backwards compatibility
-      if (input.payment_data?.token && !input.payment_data?.eip3009_authorization) {
-        sessionData.shared_payment_token = input.payment_data.token
-      }
-
       await createPaymentSessionsWorkflow(container).run({
         input: {
           payment_collection_id: paymentCollectionId,
           provider_id: input.payment_provider_id,
-          data: sessionData,
+          data: paymentSessionDataFor(input, cart?.metadata),
           context: {},
         },
       })

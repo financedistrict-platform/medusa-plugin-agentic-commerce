@@ -1,31 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
+import { credential as quotedCredential, encode, quotedSession } from "./helpers/quoted-payment"
 
-const credential = {
-  type: "x402",
-  x402Version: 2,
-  paymentPayload: {
-    x402Version: 2,
-    scheme: "exact",
-    network: "base",
-    payload: {
-      signature: "0xsig",
-      authorization: {
-        from: "0xAgent",
-        to: "0xMerchant",
-        value: "1500000",
-        validAfter: "0",
-        validBefore: String(Math.floor(Date.now() / 1000) + 3600),
-        nonce: "0xnonce",
-      },
-    },
-  },
-  paymentRequirements: { scheme: "exact" },
-}
+const credential = { type: "x402", ...quotedCredential() }
 
 const { type: _type, ...untypedCredential } = credential
-
-const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64")
 
 describe("PrismPaymentProviderService original-era instruments", () => {
   let provider: PrismPaymentProviderService
@@ -42,7 +21,7 @@ describe("PrismPaymentProviderService original-era instruments", () => {
   })
 
   const authorize = (data: Record<string, unknown>) =>
-    provider.authorizePayment({ data: { ucp_version: "2026-01-23", ...data } } as any)
+    provider.authorizePayment({ data: { ucp_version: "2026-01-23", ...quotedSession(), ...data } } as any)
 
   it.each([
     ["instrument type tokenized", { instrument_type: "tokenized" }, credential],
