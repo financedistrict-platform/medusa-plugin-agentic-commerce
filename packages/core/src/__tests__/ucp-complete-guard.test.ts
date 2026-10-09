@@ -5,6 +5,7 @@ import {
   formatZodIssuePath,
   isPrismProvider,
 } from "../lib/ucp-complete-guard"
+import { extractSignedSummary } from "../lib/validate-signed-amount"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 
@@ -61,26 +62,26 @@ describe("checkPrismInstrument", () => {
 
 describe("checkQuoteBinding", () => {
   it("passes when the signed payment matches the stored quote", () => {
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, credential)).toBeNull()
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(credential))).toBeNull()
   })
 
   it("skips carts without a Prism quote", () => {
-    expect(checkQuoteBinding({}, HANDLER_ID, credential)).toBeNull()
-    expect(checkQuoteBinding(undefined, undefined, credential)).toBeNull()
+    expect(checkQuoteBinding({}, HANDLER_ID, extractSignedSummary(credential))).toBeNull()
+    expect(checkQuoteBinding(undefined, undefined, extractSignedSummary(credential))).toBeNull()
   })
 
   it("rejects when the quote exists but the handler_id finds no stored accepts", () => {
-    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", credential))
+    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", extractSignedSummary(credential)))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but holds no UCP accepts", () => {
-    expect(checkQuoteBinding({ prism_checkout_data: { ucp: null } }, HANDLER_ID, credential))
+    expect(checkQuoteBinding({ prism_checkout_data: { ucp: null } }, HANDLER_ID, extractSignedSummary(credential)))
       .toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 
   it("rejects when the quote exists but the credential cannot be read", () => {
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, { type: "x402" }))
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary({ type: "x402" })))
       .toMatchObject({ status: 422, code: "invalid_credential" })
   })
 
@@ -92,7 +93,7 @@ describe("checkQuoteBinding", () => {
         payload: { authorization: { value: "1", to: "0xMerchant" } },
       },
     }
-    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, tampered))
+    expect(checkQuoteBinding(quotedMetadata, HANDLER_ID, extractSignedSummary(tampered)))
       .toMatchObject({ status: 422, code: "amount_mismatch" })
   })
 })

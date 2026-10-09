@@ -58,20 +58,24 @@ describe("an agent built against 0.1.12", () => {
   it("completes an original instrument through validation, the Prism guard and quote binding", () => {
     const parsed = CompleteUcpCheckoutSessionSchema.safeParse(originalBody)
     expect(parsed.success).toBe(true)
-    const extracted = extractUcpPayment(parsed.data!)
+    const extraction = extractUcpPayment(parsed.data!)
+    if (!extraction.ok) throw new Error(extraction.code)
+    const extracted = extraction.payment
     expect(extracted).toMatchObject({ handlerId: "xyz.fd.prism_payment", instrumentType: "tokenized" })
     expect(isPrismProvider("pp_prism_prism")).toBe(true)
     expect(checkPrismInstrument(parsed.data!.payment!.instruments[0])).toBeNull()
-    expect(checkQuoteBinding(originalMetadata, extracted!.handlerId, parsed.data!.payment!.instruments[0].credential)).toBeNull()
+    expect(checkQuoteBinding(originalMetadata, extracted.handlerId, extracted.signedSummary)).toBeNull()
   })
 
   it("completes an instrument without handler_id and reports prism_default as 0.1.12 did", () => {
     const { handler_id: _omit, ...instrument } = originalBody.payment.instruments[0]
     const parsed = CompleteUcpCheckoutSessionSchema.safeParse({ payment: { instruments: [instrument] } })
     expect(parsed.success).toBe(true)
-    const extracted = extractUcpPayment(parsed.data!)!
+    const extraction = extractUcpPayment(parsed.data!)
+    if (!extraction.ok) throw new Error(extraction.code)
+    const extracted = extraction.payment
     expect(checkPrismInstrument(parsed.data!.payment!.instruments[0])).toBeNull()
-    expect(checkQuoteBinding(originalMetadata, extracted.handlerId, instrument.credential)).toBeNull()
+    expect(checkQuoteBinding(originalMetadata, extracted.handlerId, extracted.signedSummary)).toBeNull()
     expect(ucpWireFor(originalRequest({})).completedPaymentHandlerId(extracted.handlerId)).toBe("prism_default")
   })
 
