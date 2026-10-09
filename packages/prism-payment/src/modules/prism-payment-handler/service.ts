@@ -3,6 +3,7 @@ import type { PaymentHandlerAdapter, CheckoutPrepareInput } from "@financedistri
 import {
   PrismClient,
   normalizeUcpHandlers,
+  resolvePrismApiKey,
   type AcpHandler,
   type PaymentHandlerConfig,
   type UcpCheckoutPrepareResponse,
@@ -41,6 +42,9 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   private readonly DISCOVERY_FAILURE_TTL = 60 * 1000
 
   constructor(_container: Record<string, unknown>, options: PrismPaymentHandlerOptions = {}) {
+    if (!resolvePrismApiKey(options.api_key)) {
+      throw new Error("Prism payment handler requires api_key or the PRISM_API_KEY environment variable; without it no Prism handler is offered and no quote can be prepared")
+    }
     this.client = new PrismClient({
       apiUrl: options.api_url,
       apiKey: options.api_key,

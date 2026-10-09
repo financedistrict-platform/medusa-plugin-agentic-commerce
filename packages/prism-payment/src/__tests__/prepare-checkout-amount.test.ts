@@ -20,7 +20,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
   let updateCartsSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
-    adapter = new PrismPaymentHandlerAdapter({}, {})
+    adapter = new PrismPaymentHandlerAdapter({}, { api_key: "key" })
     preparePaymentSpy = vi.fn().mockResolvedValue({ ok: true })
     updateCartsSpy = vi.fn().mockResolvedValue(undefined)
     // Inject our spies via the private client field — the adapter never

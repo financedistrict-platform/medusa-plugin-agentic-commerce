@@ -29,7 +29,7 @@ import type {
   SettledPayment,
 } from "./types"
 import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
-import { PrismClient } from "../../lib/prism-client"
+import { PrismClient, resolvePrismApiKey } from "../../lib/prism-client"
 import { PRISM_CHECKOUT_DATA_KEY } from "../prism-payment-handler/service"
 import {
   asStoredQuote,
@@ -83,7 +83,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
   static validateOptions(options: Record<string, unknown>) {
     if (!options.api_url) throw new Error("Prism payment provider requires api_url")
-    if (!options.api_key && !process.env.PRISM_API_KEY) {
+    if (!resolvePrismApiKey(options.api_key)) {
       throw new Error("Prism payment provider requires api_key or the PRISM_API_KEY environment variable; without it every Prism payment is rejected")
     }
   }

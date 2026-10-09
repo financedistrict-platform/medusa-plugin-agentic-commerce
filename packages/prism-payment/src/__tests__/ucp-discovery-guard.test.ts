@@ -211,7 +211,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
     container: { resolve: () => ({ updateCarts: vi.fn() }) },
   } as any)
   const adapterWith = (client: Record<string, unknown>) => {
-    const adapter = new PrismPaymentHandlerAdapter({}, {})
+    const adapter = new PrismPaymentHandlerAdapter({}, { api_key: "key" })
     ;(adapter as any).client = { getApiUrl: () => "https://gw.test", getApiKey: () => "key", fetchAcpHandlers: vi.fn().mockResolvedValue([acpDeclaration]), ...client }
     return adapter
   }
@@ -326,7 +326,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
   })
 
   it("asks Prism for ACP handlers without a version and caches the result", async () => {
-    const adapter = new PrismPaymentHandlerAdapter({}, {})
+    const adapter = new PrismPaymentHandlerAdapter({}, { api_key: "key" })
     const fetchAcp = vi.fn().mockResolvedValue([])
     ;(adapter as any).client = { fetchAcpHandlers: fetchAcp, getApiUrl: () => "https://gw.test" }
 

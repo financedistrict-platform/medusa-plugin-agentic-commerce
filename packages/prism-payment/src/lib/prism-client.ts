@@ -107,13 +107,18 @@ export type PrismClientOptions = {
   apiKey?: string
 }
 
+export function resolvePrismApiKey(configured?: unknown): string {
+  const fromOptions = typeof configured === "string" ? configured.trim() : ""
+  return fromOptions || (process.env.PRISM_API_KEY ?? "").trim()
+}
+
 export class PrismClient {
   private apiUrl: string
   private apiKey: string
 
   constructor(options: PrismClientOptions = {}) {
     this.apiUrl = options.apiUrl || process.env.PRISM_API_URL || "https://prism-gw.fd.xyz"
-    this.apiKey = options.apiKey || process.env.PRISM_API_KEY || ""
+    this.apiKey = resolvePrismApiKey(options.apiKey)
   }
 
   async fetchUcpHandlers(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
