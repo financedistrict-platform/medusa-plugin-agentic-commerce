@@ -41,8 +41,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
   const paymentProviderId = agenticCommerceService.getPaymentProviderId()
 
-  const extracted = extractUcpPayment(body)
-  if (!extracted) {
+  const extraction = extractUcpPayment(body)
+  if (!extraction.ok && extraction.code === "conflicting_credential") {
+    reject({
+      status: 422,
+      code: "invalid_credential",
+      content: "The payment credential must carry either authorization or paymentPayload, not both.",
+    })
+    return
+  }
+  if (!extraction.ok) {
     res.status(400).json(ucpErrorFor(req, {
       code: "missing_payment",
       content: "Payment is required to complete checkout. Provide payment.instruments with a valid credential.",
@@ -50,7 +58,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     return
   }
 
-  const { eip3009Authorization, x402Version, handlerId, instrumentType } = extracted
+  const { eip3009Authorization, signedSummary, x402Version, handlerId, instrumentType } = extraction.payment
   const instrument = body.payment!.instruments[0]
 
   if (isPrismProvider(paymentProviderId)) {
@@ -67,7 +75,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     fields: ["id", "metadata"],
     filters: { id },
   })
-  const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, instrument.credential)
+  const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, signedSummary)
   if (bindingFailure) {
     reject(bindingFailure)
     return

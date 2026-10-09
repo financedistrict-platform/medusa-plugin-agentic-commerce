@@ -1,7 +1,7 @@
 import {
-  extractSignedSummary,
   readStoredPrismAccepts,
   validateSignedAgainstStored,
+  type SignedPaymentSummary,
 } from "./validate-signed-amount"
 
 export const PRISM_UCP_HANDLER_ID = "xyz.fd.prism_payment"
@@ -56,11 +56,10 @@ export function checkPrismInstrument(instrument: InstrumentInput): GuardFailure 
 export function checkQuoteBinding(
   cartMetadata: unknown,
   handlerId: string | undefined,
-  credential: unknown,
+  signedSummary: SignedPaymentSummary | null,
 ): GuardFailure | null {
   if (!hasPrismQuote(cartMetadata)) return null
 
-  const signedSummary = extractSignedSummary(credential)
   if (!signedSummary) {
     return {
       status: 422,

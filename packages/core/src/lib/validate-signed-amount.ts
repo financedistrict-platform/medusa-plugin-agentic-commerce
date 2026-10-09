@@ -37,60 +37,33 @@ export type ValidationErrorCode =
   | "amount_mismatch"
   | "wrong_recipient"
 
-// =====================================================
-// Extraction — handles every credential shape we've seen on the wire
-// =====================================================
+export function extractSignedSummary(authorizationB64: string): SignedPaymentSummary | null {
+  const decoded = decodeBase64Json(authorizationB64)
+  if (!isRecord(decoded) || !isRecord(decoded.paymentPayload)) return null
 
-/**
- * Extract (network, asset, value, to) from a UCP/ACP credential.
- * Handles base64-string, legacy single-field, wrapper, and flat shapes.
- * Returns null if the input is unrecognised or missing required fields.
- */
-export function extractSignedSummary(input: unknown): SignedPaymentSummary | null {
-  if (typeof input === "string") {
-    return extractFromBase64(input)
-  }
-  if (typeof input !== "object" || input === null) {
-    return null
-  }
-  const obj = input as Record<string, unknown>
-
-  // Legacy single-field shape: { authorization: "<b64>" }
-  if (
-    typeof obj.authorization === "string" &&
-    obj.authorization.length > 0 &&
-    !obj.paymentPayload
-  ) {
-    return extractFromBase64(obj.authorization)
-  }
-
-  // Wrapper { paymentPayload, ... } or flat (obj IS the paymentPayload).
-  const pp =
-    obj.paymentPayload && typeof obj.paymentPayload === "object"
-      ? (obj.paymentPayload as Record<string, unknown>)
-      : obj
-
-  const accepted = pp.accepted as Record<string, unknown> | undefined
-  const payload = pp.payload as Record<string, unknown> | undefined
-  const authz = payload?.authorization as Record<string, unknown> | undefined
-
+  const { accepted, payload } = decoded.paymentPayload
+  const authz = isRecord(payload) ? payload.authorization : undefined
   const network = readNonEmptyString(accepted, "network")
   const asset = readNonEmptyString(accepted, "asset")
   const value = readNonEmptyString(authz, "value")
   const to = readNonEmptyString(authz, "to")
 
-  if (!network || !asset || !value || !to) return null
+  if (!network || !asset || !value || !to || !ATOMIC_UNITS.test(value)) return null
   return { network, asset, value, to }
 }
 
-function extractFromBase64(b64: string): SignedPaymentSummary | null {
+const ATOMIC_UNITS = /^[0-9]+$/
+
+function decodeBase64Json(b64: string): unknown {
   try {
-    const decoded = Buffer.from(b64, "base64").toString("utf-8")
-    const parsed = JSON.parse(decoded)
-    return extractSignedSummary(parsed)
+    return JSON.parse(Buffer.from(b64, "base64").toString("utf-8"))
   } catch {
     return null
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 // =====================================================
@@ -221,11 +194,8 @@ function sameAtomicValue(a: string, b: string): boolean {
   }
 }
 
-function readNonEmptyString(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-): string | undefined {
-  if (!obj) return undefined
+function readNonEmptyString(obj: unknown, key: string): string | undefined {
+  if (!isRecord(obj)) return undefined
   const v = obj[key]
   return typeof v === "string" && v.length > 0 ? v : undefined
 }
