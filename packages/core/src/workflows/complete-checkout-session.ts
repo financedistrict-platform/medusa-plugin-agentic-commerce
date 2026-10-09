@@ -5,12 +5,15 @@ import {
   when,
 } from "@medusajs/framework/workflows-sdk"
 import {
+  acquireLockStep,
   completeCartWorkflow,
   capturePaymentWorkflow,
+  releaseLockStep,
   useQueryGraphStep,
 } from "@medusajs/medusa/core-flows"
 import { validateCheckoutPrerequisitesStep } from "./steps/validate-checkout-prerequisites"
 import { ensureShippingMethodStep } from "./steps/ensure-shipping-method"
+import { ensurePaymentCollectionStep } from "./steps/ensure-payment-collection"
 import { setupPaymentStep } from "./steps/setup-payment"
 import { paymentToCapture } from "../lib/payment-to-capture"
 
@@ -41,6 +44,10 @@ const completeCheckoutSessionWorkflow = createWorkflow(
 
     // Step 2: Ensure shipping method is set
     ensureShippingMethodStep({ cart_id: input.cart_id })
+
+    ensurePaymentCollectionStep({ cart_id: input.cart_id })
+
+    acquireLockStep({ key: input.cart_id, timeout: 30, ttl: 120 })
 
     // Step 3: Setup payment collection + session
     const paymentData = transform(input, (input) => {
@@ -100,6 +107,8 @@ const completeCheckoutSessionWorkflow = createWorkflow(
         input: transform(paymentId, (id) => ({ payment_id: id as string })),
       })
     })
+
+    releaseLockStep({ key: input.cart_id })
 
     // Step 6: Extract order info from result.
     // completeCartWorkflow returns { id: order.id } per Medusa core-flows, but

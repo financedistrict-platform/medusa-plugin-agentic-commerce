@@ -330,6 +330,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       authorization,
       data.payment_quote,
       data.amount,
+      data.currency_code,
       Math.floor(Date.now() / 1000),
       this.client.getApiKey(),
     )
