@@ -38,6 +38,7 @@
  *     {
  *       resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agentic-commerce",
  *       options: {
+ *         payment_provider_id: "pp_prism_prism",
  *         payment_handler_adapters: ["prismPaymentHandler"],
  *         // ...other options
  *       },
