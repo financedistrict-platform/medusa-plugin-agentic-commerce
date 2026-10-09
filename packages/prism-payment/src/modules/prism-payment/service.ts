@@ -32,6 +32,7 @@ import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
 import { PrismClient } from "../../lib/prism-client"
 import { PRISM_CHECKOUT_DATA_KEY } from "../prism-payment-handler/service"
 import {
+  asStoredQuote,
   bindAuthorizationToQuote,
   reconcileSettlement,
   settledPaymentMismatch,
@@ -339,7 +340,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     const inputData = (input.data || {}) as Record<string, unknown>
     const sessionId = typeof inputData.prism_session_id === "string" ? inputData.prism_session_id : crypto.randomUUID()
-    return { data: this.sessionDataFrom(sessionId, input) }
+    const data = this.sessionDataFrom(sessionId, input)
+    const keptQuote = data.payment_quote ?? asStoredQuote(inputData.payment_quote)
+    return { data: keptQuote ? { ...data, payment_quote: keptQuote } : data }
   }
 
   async getPaymentStatus(input: GetPaymentStatusInput): Promise<GetPaymentStatusOutput> {

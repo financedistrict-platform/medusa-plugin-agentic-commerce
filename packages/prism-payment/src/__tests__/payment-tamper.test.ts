@@ -666,4 +666,45 @@ describe("Prism provider settles a session only once", () => {
 
     expect((updated.data as Record<string, unknown>).payment_quote).toEqual(data.payment_quote)
   })
+
+  it("keeps the signed quote when a session update carries the data of the session it replaces", async () => {
+    const data = await sessionData(provider, credential())
+
+    const updated = await provider.updatePayment({ amount: CART_TOTAL, currency_code: "usd", data } as any)
+
+    expect((updated.data as Record<string, unknown>).payment_quote).toEqual(data.payment_quote)
+    const result = await provider.authorizePayment({ data: updated.data } as any)
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not trust a quote carried by a session update: a wrong signature still fails before Prism is called", async () => {
+    const data = await sessionData(provider, credential())
+    const quote = data.payment_quote as Record<string, unknown>
+
+    const updated = await provider.updatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { ...data, payment_quote: { ...quote, signature: "0".repeat(64) } },
+    } as any)
+
+    const result = await provider.authorizePayment({ data: updated.data } as any)
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("invalid_quote_signature")
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("keeps only the fields of a carried quote that a stored quote has", async () => {
+    const data = await sessionData(provider, credential())
+    const quote = data.payment_quote as Record<string, unknown>
+
+    const updated = await provider.updatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { ...data, payment_quote: { ...quote, injected: "x" } },
+    } as any)
+
+    expect((updated.data as Record<string, unknown>).payment_quote).toEqual(quote)
+  })
 })

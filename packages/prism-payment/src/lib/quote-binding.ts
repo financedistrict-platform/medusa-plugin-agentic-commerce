@@ -226,7 +226,7 @@ function quoteTermsFromCheckoutData(checkoutData: unknown): QuoteTerms | null {
   })
 }
 
-function asStoredQuote(value: unknown): StoredQuote | null {
+export function asStoredQuote(value: unknown): StoredQuote | null {
   const terms = asQuoteTerms(value)
   if (!terms || !isRecord(value) || !allNonEmpty(value.signature)) return null
   return { ...terms, signature: value.signature as string }
