@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createRequest, createResponse, createStoreService } from "./helpers/render-wire"
 import { extractSignedSummary } from "../lib/validate-signed-amount"
+import { paymentSessionDataFor } from "../workflows/steps/setup-payment"
 
 const completeRun = vi.hoisted(() => vi.fn(async () => {
   throw new Error("stop after settlement handoff")
@@ -160,5 +161,25 @@ describe("UCP complete tamper cases", () => {
     expect(completeRun).toHaveBeenCalledTimes(1)
     expect(settledSummary()).toMatchObject({ value: QUOTED_AMOUNT })
     expect(settledAuthorization()).toBe(authorization)
+  })
+})
+
+describe("payment session data handed to the provider", () => {
+  it("carries the cart's stored quote from server-side metadata", () => {
+    const data = paymentSessionDataFor(
+      { ucp_version: "2026-04-08", payment_data: { eip3009_authorization: base64Credential(QUOTED_AMOUNT) } },
+      quotedMetadata,
+    )
+
+    expect(data.prism_checkout_data).toEqual(quotedMetadata.prism_checkout_data)
+  })
+
+  it("carries no quote when the cart has none, so the provider fails closed", () => {
+    const data = paymentSessionDataFor(
+      { ucp_version: "2026-04-08", payment_data: { eip3009_authorization: base64Credential(QUOTED_AMOUNT) } },
+      {},
+    )
+
+    expect(data).not.toHaveProperty("prism_checkout_data")
   })
 })

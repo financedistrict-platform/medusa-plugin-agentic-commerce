@@ -29,6 +29,17 @@ import type {
 } from "./types"
 import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
 import { PrismClient } from "../../lib/prism-client"
+import { PRISM_CHECKOUT_DATA_KEY } from "../prism-payment-handler/service"
+import {
+  bindAuthorizationToQuote,
+  storedQuoteFromCheckoutData,
+  type QuotedRequirements,
+} from "../../lib/quote-binding"
+
+type SettlementTarget = {
+  x402Version: number
+  requirements: QuotedRequirements
+}
 
 class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentConfig> {
   static identifier = "prism"
@@ -80,6 +91,12 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     if (inputData.ucp_version) {
       data.ucp_version = inputData.ucp_version
     }
+    const paymentQuote = storedQuoteFromCheckoutData(inputData[PRISM_CHECKOUT_DATA_KEY])
+    if (paymentQuote) {
+      data.payment_quote = paymentQuote
+    } else if (inputData[PRISM_CHECKOUT_DATA_KEY]) {
+      console.warn("[prism-payment] Stored Prism quote is unreadable or unsigned; authorization will be rejected")
+    }
 
     return { id: sessionId, data }
   }
@@ -129,18 +146,17 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       }
     }
 
-    const now = Math.floor(Date.now() / 1000)
-    const validBefore = parseInt(eip3009.validBefore, 10)
-    if (validBefore && validBefore < now) {
+    const binding = this.bindToQuote(authorization, data)
+    if (!binding.ok) {
       return {
-        data: { ...data, error: "authorization_expired" },
+        data: { ...data, error: binding.error },
         status: "error" as PaymentSessionStatus,
       }
     }
 
     if (this.verifyBeforeSettle) {
       try {
-        const verifyResult = await this.verifyWithPrism(authorization)
+        const verifyResult = await this.verifyWithPrism(authorization, binding)
         if (!verifyResult.isValid) {
           return {
             data: { ...data, error: `prism_verification_failed: ${verifyResult.error ?? "unknown"}` },
@@ -155,7 +171,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
     if (this.autoCapture) {
       try {
-        const settleResult = await this.settleWithPrism(authorization)
+        const settleResult = await this.settleWithPrism(authorization, binding)
         if (!settleResult.success) {
           const reason = settleResult.errorReason ?? "unknown"
           return {
@@ -177,7 +193,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
             prism_tx_id: settleResult.transaction,
             network: settledNetwork,
             payer: settleResult.payer ?? eip3009.from,
-            amount: eip3009.value,
+            signed_value: eip3009.value,
           },
           status: "authorized" as PaymentSessionStatus,
         }
@@ -197,7 +213,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         x402_authorization: authorizationB64,
         network,
         payer: eip3009.from,
-        amount: eip3009.value,
+        signed_value: eip3009.value,
         verified: true,
       },
       status: "authorized" as PaymentSessionStatus,
@@ -221,7 +237,12 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         Buffer.from(authorizationB64, "base64").toString("utf-8")
       ) as X402PaymentAuthorization
 
-      const settleResult = await this.settleWithPrism(authorization)
+      const binding = this.bindToQuote(authorization, data)
+      if (!binding.ok) {
+        throw new Error(binding.error)
+      }
+
+      const settleResult = await this.settleWithPrism(authorization, binding)
       if (!settleResult.success) {
         throw new Error(
           `Settlement failed: ${settleResult.errorReason ?? "unknown"}`
@@ -300,16 +321,29 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     return { action: "not_supported" }
   }
 
-  private paymentRequest(authorization: X402PaymentAuthorization) {
+  private bindToQuote(authorization: X402PaymentAuthorization, data: Record<string, unknown>) {
+    return bindAuthorizationToQuote(
+      authorization,
+      data.payment_quote,
+      data.amount,
+      Math.floor(Date.now() / 1000),
+      this.client.getApiKey(),
+    )
+  }
+
+  private paymentRequest(authorization: X402PaymentAuthorization, target: SettlementTarget) {
     return {
-      x402Version: authorization.x402Version || 2,
+      x402Version: target.x402Version,
       paymentPayload: authorization.paymentPayload,
-      paymentRequirements: authorization.paymentRequirements,
+      paymentRequirements: target.requirements,
     }
   }
 
-  private async verifyWithPrism(authorization: X402PaymentAuthorization): Promise<PrismVerifyResponse> {
-    const raw = await this.client.verifyPayment(this.paymentRequest(authorization))
+  private async verifyWithPrism(
+    authorization: X402PaymentAuthorization,
+    target: SettlementTarget,
+  ): Promise<PrismVerifyResponse> {
+    const raw = await this.client.verifyPayment(this.paymentRequest(authorization, target))
     return {
       isValid: raw.isValid === true || raw.valid === true,
       payer: typeof raw.payer === "string" ? raw.payer : undefined,
@@ -322,8 +356,11 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     }
   }
 
-  private async settleWithPrism(authorization: X402PaymentAuthorization): Promise<PrismSettleResponse> {
-    const raw = await this.client.settlePayment(this.paymentRequest(authorization))
+  private async settleWithPrism(
+    authorization: X402PaymentAuthorization,
+    target: SettlementTarget,
+  ): Promise<PrismSettleResponse> {
+    const raw = await this.client.settlePayment(this.paymentRequest(authorization, target))
     const pickString = (...keys: string[]): string | undefined => {
       for (const k of keys) {
         const v = raw[k]
