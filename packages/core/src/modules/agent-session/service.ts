@@ -1,10 +1,31 @@
 import { MedusaService } from "@medusajs/framework/utils"
 import AgentSession from "./models/agent-session"
+import PaymentAuthorization from "./models/payment-authorization"
 import type { AgentSessionRecord, AgentSessionStore, OpenAgentSessionInput } from "../../lib/agent-session"
+import type { AuthorizationUse, PaymentLedgerStore } from "../../lib/payment-ledger"
 
 type StoredRow = AgentSessionRecord & { id: string }
 
-class AgentSessionService extends MedusaService({ AgentSession }) implements AgentSessionStore {
+type AuthorizationKey = { asset: string; payer: string; nonce: string }
+
+type StoredAuthorization = AuthorizationKey & { id: string; cart_id: string }
+
+class AgentSessionService extends MedusaService({ AgentSession, PaymentAuthorization }) implements AgentSessionStore, PaymentLedgerStore {
+  async reserve({ asset, payer, nonce, cartId }: AuthorizationUse): Promise<boolean> {
+    const key = { asset: asset.toLowerCase(), payer: payer.toLowerCase(), nonce: nonce.toLowerCase() }
+    const held = await this.holderOf(key)
+    if (held) return held.cart_id === cartId
+
+    try {
+      await this.createPaymentAuthorizations({ ...key, cart_id: cartId })
+      return true
+    } catch (error: unknown) {
+      const raced = await this.holderOf(key)
+      if (raced) return raced.cart_id === cartId
+      throw error
+    }
+  }
+
   async find(cartId: string): Promise<AgentSessionRecord | null> {
     const [row] = (await this.listAgentSessions({ cart_id: cartId }, { take: 1 })) as StoredRow[]
     return row ?? null
@@ -36,6 +57,11 @@ class AgentSessionService extends MedusaService({ AgentSession }) implements Age
   async discard(cartId: string): Promise<void> {
     const [row] = (await this.listAgentSessions({ cart_id: cartId }, { take: 1 })) as StoredRow[]
     if (row) await this.deleteAgentSessions(row.id)
+  }
+
+  private async holderOf(key: AuthorizationKey): Promise<StoredAuthorization | undefined> {
+    const [row] = (await this.listPaymentAuthorizations(key, { take: 1, withDeleted: true })) as StoredAuthorization[]
+    return row
   }
 
   private async requireRow(cartId: string): Promise<StoredRow> {

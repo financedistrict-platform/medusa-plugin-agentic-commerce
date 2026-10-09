@@ -203,6 +203,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Unknown error"
         console.error("[prism-payment] Prism verification failed:", message)
+        return {
+          data: { ...data, error: `prism_verification_error: ${message}` },
+          status: "error" as PaymentSessionStatus,
+        }
       }
     }
 
@@ -250,7 +254,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         network,
         payer: eip3009.from,
         signed_value: eip3009.value,
-        verified: true,
+        ...(this.verifyBeforeSettle ? { verified: true } : {}),
       },
       status: "authorized" as PaymentSessionStatus,
     }

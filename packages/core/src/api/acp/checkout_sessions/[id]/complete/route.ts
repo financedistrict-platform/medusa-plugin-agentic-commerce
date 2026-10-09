@@ -7,6 +7,7 @@ import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
 import { checkQuoteBinding, isPrismProvider, PRISM_UCP_HANDLER_ID } from "../../../../../lib/ucp-complete-guard"
 import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
 import { recordSettledPayment } from "../../../../../lib/settled-payment-record"
+import { isAuthorizationUsed, PAYMENT_AUTHORIZATION_USED } from "../../../../../lib/payment-ledger"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -107,7 +108,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     const statusCode = error.type === "not_found" ? 404
-      : error.type === "duplicate_error" ? 409
+      : error.type === "duplicate_error" || isAuthorizationUsed(error) ? 409
       : error.type === "not_allowed" ? 410
       : error.type === "invalid_data" ? 400
       : 500
@@ -115,6 +116,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     res.status(statusCode).json(formatAcpError({
       type: httpStatusToAcpType(statusCode),
       code: error.type === "duplicate_error" ? "already_completed"
+        : isAuthorizationUsed(error) ? PAYMENT_AUTHORIZATION_USED
         : error.type === "not_allowed" ? "session_canceled"
         : error.type === "invalid_data" ? "invalid_request"
         : "checkout_failed",
