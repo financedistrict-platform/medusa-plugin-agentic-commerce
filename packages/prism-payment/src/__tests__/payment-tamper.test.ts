@@ -12,6 +12,7 @@ import {
   signedCheckoutData,
   unsignedCheckoutData,
 } from "./helpers/quoted-payment"
+import { quoteSignatureFor } from "../lib/quote-binding"
 
 function makeProvider(options: Record<string, unknown> = {}) {
   const provider = new PrismPaymentProviderService({}, {
@@ -33,10 +34,11 @@ async function sessionData(
   cred: unknown,
   amount: number = CART_TOTAL,
   storedQuote: unknown = checkoutData,
+  currencyCode = "usd",
 ) {
   const initiated = await provider.initiatePayment({
     amount,
-    currency_code: "usd",
+    currency_code: currencyCode,
     data: { eip3009_authorization: encode(cred), x402_version: 2, prism_checkout_data: storedQuote },
   } as any)
   return initiated.data as Record<string, unknown>
@@ -139,6 +141,21 @@ describe("Prism provider tamper cases", () => {
 
   it("rejects a quote prepared for a different total than the current order total", async () => {
     await expectRejected(await sessionData(provider, credential(), CART_TOTAL * 100), "quote_total_mismatch")
+  })
+
+  it("rejects a quote prepared in another currency than the order", async () => {
+    await expectRejected(await sessionData(provider, credential(), CART_TOTAL, checkoutData, "jpy"), "quote_currency_mismatch")
+  })
+
+  it("rejects a quote signed without saying which currency it was prepared in", async () => {
+    const { preparedCurrency: _dropped, ...withoutCurrency } = unsignedCheckoutData() as Record<string, unknown>
+    const signed = { ...withoutCurrency, quoteSignature: quoteSignatureFor(withoutCurrency as never, QUOTE_SIGNING_KEY) }
+    await expectRejected(await sessionData(provider, credential(), CART_TOTAL, signed), "missing_payment_quote")
+  })
+
+  it("rejects a stored quote whose currency was rewritten after it was signed", async () => {
+    const forged = { ...checkoutData, preparedCurrency: "jpy" }
+    await expectRejected(await sessionData(provider, credential(), CART_TOTAL, forged, "jpy"), "invalid_quote_signature")
   })
 
   it("rejects a stored quote whose amount was rewritten after it was signed", async () => {

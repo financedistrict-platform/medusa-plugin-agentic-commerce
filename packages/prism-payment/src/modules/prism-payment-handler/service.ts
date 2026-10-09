@@ -19,6 +19,7 @@ type PrismCheckoutData = {
   ucp: UcpCheckoutPrepareResponse | null
   acp: AcpHandler | null
   preparedAmount: string
+  preparedCurrency: string
   preparedResourceUrl: string
   quoteSignature?: string
 }
@@ -59,6 +60,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
 
     const totalMajor = cart.total ?? cart.raw_total?.value ?? 0
     const currency = (cart.currency_code || "eur").toUpperCase()
+    const preparedCurrency = currency.toLowerCase()
     const amount = String(Number(totalMajor))
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
@@ -67,6 +69,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       existing &&
       existing.preparedResourceUrl === resourceUrl &&
       existing.preparedAmount === amount &&
+      existing.preparedCurrency === preparedCurrency &&
       (existing.ucp || existing.acp) &&
       hasValidQuoteSignature(existing, this.client.getApiKey())
     ) {
@@ -109,6 +112,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       ucp,
       acp,
       preparedAmount: amount,
+      preparedCurrency,
       preparedResourceUrl: resourceUrl,
     }
     const quoteSignature = quoteSignatureFor(terms, this.client.getApiKey())

@@ -1,7 +1,6 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/utils"
 import {
-  createPaymentCollectionForCartWorkflow,
   createPaymentSessionsWorkflow,
   deletePaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
@@ -86,6 +85,7 @@ export const setupPaymentStep = createStep(
       fields: [
         "id",
         "total",
+        "currency_code",
         "metadata",
         "payment_collection.id",
         "payment_collection.amount",
@@ -94,37 +94,19 @@ export const setupPaymentStep = createStep(
       filters: { id: input.cart_id },
     })
 
-    let paymentCollectionId = cart?.payment_collection?.id
-    let paymentCollectionAmount = cart?.payment_collection?.amount
-
-    // Create payment collection if none exists
+    const paymentCollectionId = cart?.payment_collection?.id
     if (!paymentCollectionId) {
-      await createPaymentCollectionForCartWorkflow(container).run({
-        input: { cart_id: input.cart_id },
-      })
-
-      // Re-fetch to get the payment collection ID
-      const { data: [updatedCart] } = await query.graph({
-        entity: "cart",
-        fields: ["id", "payment_collection.id", "payment_collection.amount"],
-        filters: { id: input.cart_id },
-      })
-
-      paymentCollectionId = updatedCart?.payment_collection?.id
-      paymentCollectionAmount = updatedCart?.payment_collection?.amount
-
-      if (!paymentCollectionId) {
-        throw new MedusaError(
-          MedusaError.Types.UNEXPECTED_STATE,
-          "Failed to create payment collection for cart"
-        )
-      }
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cart ${input.cart_id} has no payment collection to pay`
+      )
     }
 
     const mismatch = checkoutTotalMismatch({
       paymentProviderId: input.payment_provider_id,
       cartTotal: cart?.total,
-      paymentCollectionAmount,
+      cartCurrency: cart?.currency_code,
+      paymentCollectionAmount: cart?.payment_collection?.amount,
       cartMetadata: cart?.metadata,
     })
     if (mismatch) {
@@ -158,31 +140,9 @@ export const setupPaymentStep = createStep(
       })
     }
 
-    return new StepResponse(
-      {
-        cart_id: input.cart_id,
-        payment_collection_id: paymentCollectionId,
-      },
-      // Compensation data — used for cleanup on workflow failure
-      {
-        cart_id: input.cart_id,
-        payment_collection_id: paymentCollectionId,
-      }
-    )
-  },
-  // Compensation: refresh payment collection on failure
-  async (compensationData, { container }) => {
-    if (!compensationData?.cart_id) return
-
-    try {
-      const { refreshPaymentCollectionForCartWorkflow } = await import(
-        "@medusajs/medusa/core-flows"
-      )
-      await refreshPaymentCollectionForCartWorkflow(container).run({
-        input: { cart_id: compensationData.cart_id },
-      })
-    } catch {
-      // Best effort cleanup — don't throw from compensation
-    }
+    return new StepResponse({
+      cart_id: input.cart_id,
+      payment_collection_id: paymentCollectionId,
+    })
   }
 )
