@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
 import { PrismClient, isContractEntry, normalizeUcpHandlers } from "../lib/prism-client"
+import { credential, encode, quotedSession } from "./helpers/quoted-payment"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const PRISM_FIXTURES = join(__dirname, "..", "..", "..", "core", "src", "__fixtures__", "prism")
@@ -211,7 +212,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
   } as any)
   const adapterWith = (client: Record<string, unknown>) => {
     const adapter = new PrismPaymentHandlerAdapter({}, {})
-    ;(adapter as any).client = { getApiUrl: () => "https://gw.test", fetchAcpHandlers: vi.fn().mockResolvedValue([acpDeclaration]), ...client }
+    ;(adapter as any).client = { getApiUrl: () => "https://gw.test", getApiKey: () => "key", fetchAcpHandlers: vi.fn().mockResolvedValue([acpDeclaration]), ...client }
     return adapter
   }
 
@@ -337,15 +338,7 @@ describe("PrismPaymentHandlerAdapter version forwarding", () => {
 })
 
 describe("Prism provider payment calls", () => {
-  const authorization = {
-    x402Version: 2,
-    paymentPayload: {
-      network: "base",
-      payload: { authorization: { from: "0xA", value: "1", validBefore: String(Math.floor(Date.now() / 1000) + 3600) } },
-    },
-    paymentRequirements: { scheme: "exact" },
-  }
-  const encoded = Buffer.from(JSON.stringify(authorization)).toString("base64")
+  const encoded = encode(credential())
   const provider = () => new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key" } as any)
   const okFetch = () =>
     vi.fn(async (url: string) =>
@@ -360,7 +353,7 @@ describe("Prism provider payment calls", () => {
     const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
-    const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded, ucp_version: "2026-01-23" } } as any)
+    const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded, ucp_version: "2026-01-23", ...quotedSession() } } as any)
 
     expect(result.status).toBe("authorized")
     const calls = fetchStub.mock.calls as unknown as [string, RequestInit][]
@@ -374,7 +367,7 @@ describe("Prism provider payment calls", () => {
     const fetchStub = vi.fn(async () => new Response(JSON.stringify({ success: true, transaction: "0xtx" }), { status: 200 }))
     vi.stubGlobal("fetch", fetchStub)
 
-    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest" } } as any)
+    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest", ...quotedSession() } } as any)
 
     expect(fetchStub).toHaveBeenCalledTimes(1)
   })
@@ -389,7 +382,7 @@ describe("Prism provider payment calls", () => {
     vi.stubGlobal("fetch", fetchStub)
     const manual = new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key", auto_capture: false } as any)
 
-    const authorized = await manual.authorizePayment({ data: { eip3009_authorization: encoded } } as any)
+    const authorized = await manual.authorizePayment({ data: { eip3009_authorization: encoded, ...quotedSession() } } as any)
     expect(authorized.status).toBe("authorized")
     expect(fetchStub).toHaveBeenCalledTimes(1)
 

@@ -27,6 +27,7 @@ describe("PrismPaymentHandlerAdapter.prepareCheckoutPayment — amount unit hand
     // re-creates the client after construction.
     ;(adapter as any).client = {
       getApiUrl: () => "https://api.test",
+      getApiKey: () => "key",
       fetchUcpHandlers: vi.fn().mockResolvedValue({ "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-10-07", spec: "https://api.test/spec.md", schema: "https://api.test/schema.json", config: {} }] }),
       preparePayment: preparePaymentSpy,
       fetchAcpHandlers: vi.fn().mockResolvedValue([]),

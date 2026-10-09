@@ -9,6 +9,7 @@ import {
   type UcpHandlersDiscoveryResponse,
 } from "../../lib/prism-client"
 import { PRISM_HANDLER_ID } from "../prism-payment/types"
+import { hasValidQuoteSignature, paymentConfigFromCheckoutData, quoteSignatureFor } from "../../lib/quote-binding"
 
 export const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
 
@@ -19,6 +20,7 @@ type PrismCheckoutData = {
   acp: AcpHandler | null
   preparedAmount: string
   preparedResourceUrl: string
+  quoteSignature?: string
 }
 
 export type PrismPaymentHandlerOptions = {
@@ -65,7 +67,8 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       existing &&
       existing.preparedResourceUrl === resourceUrl &&
       existing.preparedAmount === amount &&
-      (existing.ucp || existing.acp)
+      (existing.ucp || existing.acp) &&
+      hasValidQuoteSignature(existing, this.client.getApiKey())
     ) {
       return existing
     }
@@ -102,12 +105,17 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       : null
     const acp: AcpHandler | null = acpDeclaration ? { ...acpDeclaration, config } : null
 
-    const data: PrismCheckoutData = {
+    const terms: PrismCheckoutData = {
       ucp,
       acp,
       preparedAmount: amount,
       preparedResourceUrl: resourceUrl,
     }
+    const quoteSignature = quoteSignatureFor(terms, this.client.getApiKey())
+    if (!quoteSignature) {
+      console.error(`[prism-payment-handler] Prism quote for cart ${cart.id} could not be signed; checkout will be rejected`)
+    }
+    const data: PrismCheckoutData = quoteSignature ? { ...terms, quoteSignature } : terms
 
     try {
       const cartModuleService = container.resolve("cart") as any
@@ -136,29 +144,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
   }
 
   extractPaymentConfig(cartMetadata?: Record<string, unknown>): PaymentHandlerConfig | null {
-    const data = cartMetadata?.[PRISM_CHECKOUT_DATA_KEY] as PrismCheckoutData | undefined
-    if (!data) return null
-
-    if (data.ucp) {
-      const firstNamespace = Object.values(data.ucp)[0]
-      const firstEntry = firstNamespace?.[0]
-      if (firstEntry?.config) return firstEntry.config
-    }
-
-    if (data.acp?.config && this.isPaymentHandlerConfig(data.acp.config)) {
-      return data.acp.config
-    }
-
-    return null
-  }
-
-  private isPaymentHandlerConfig(value: unknown): value is PaymentHandlerConfig {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      "x402Version" in value &&
-      "accepts" in value
-    )
+    return paymentConfigFromCheckoutData(cartMetadata?.[PRISM_CHECKOUT_DATA_KEY])
   }
 
   private async clearStoredQuote(
