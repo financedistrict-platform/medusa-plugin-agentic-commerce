@@ -1,5 +1,6 @@
 import crypto from "crypto"
 import type { AgentSessionRecord } from "./agent-session"
+import { presentedApiKey } from "./presented-api-key"
 
 export const UCP_SESSION_SECRET_HEADER = "UCP-Session-Secret"
 
@@ -15,7 +16,7 @@ function headerValue(headers: HeaderBag, name: string): string | undefined {
 }
 
 function acpFingerprint(headers: HeaderBag): string | null {
-  const apiKey = headerValue(headers, "authorization")?.replace("Bearer ", "").trim()
+  const apiKey = presentedApiKey(headers)
   return apiKey ? digest("acp", apiKey) : null
 }
 

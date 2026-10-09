@@ -39,6 +39,10 @@ function extractIdentity(req: MedusaRequest): string {
   if (authHeader) {
     return crypto.createHash("sha256").update(authHeader).digest("hex").slice(0, 16)
   }
+  const apiKey = req.headers["x-api-key"]
+  if (typeof apiKey === "string" && apiKey.trim()) {
+    return crypto.createHash("sha256").update(`Bearer ${apiKey.trim()}`).digest("hex").slice(0, 16)
+  }
   const ucpAgent = req.headers["ucp-agent"] as string
   if (ucpAgent) {
     return crypto.createHash("sha256").update(ucpAgent).digest("hex").slice(0, 16)
