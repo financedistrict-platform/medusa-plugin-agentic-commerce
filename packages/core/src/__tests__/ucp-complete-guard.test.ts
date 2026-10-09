@@ -17,7 +17,7 @@ const credential = {
   paymentPayload: {
     accepted: { network: "eip155:84532", asset: "0xAsset", amount: "1500000", payTo: "0xMerchant" },
     payload: {
-      authorization: { value: "1500000", to: "0xMerchant" },
+      authorization: { from: "0x2222222222222222222222222222222222222222", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101", value: "1500000", to: "0xMerchant" },
     },
   },
   paymentRequirements: { scheme: "exact" },
@@ -105,7 +105,7 @@ describe("checkQuoteBinding", () => {
       ...credential,
       paymentPayload: {
         ...credential.paymentPayload,
-        payload: { authorization: { value: "1", to: "0xMerchant" } },
+        payload: { authorization: { from: "0x2222222222222222222222222222222222222222", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101", value: "1", to: "0xMerchant" } },
       },
     }
     expect(checkQuoteBinding(storedQuote, HANDLER_ID, extractSignedSummary(toBase64(tampered))))

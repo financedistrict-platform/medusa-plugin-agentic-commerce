@@ -5,6 +5,11 @@ import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
 import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
 import { recordSettledPayment, settledSessionData } from "../../../../../lib/settled-payment-record"
+import {
+  isAuthorizationUsed,
+  PAYMENT_AUTHORIZATION_USED,
+  PAYMENT_AUTHORIZATION_USED_MESSAGE,
+} from "../../../../../lib/payment-ledger"
 import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
 import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
@@ -167,6 +172,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       })
     } catch {
       // Best effort cleanup
+    }
+
+    if (isAuthorizationUsed(error)) {
+      res.status(409).json(ucpErrorFor(req, {
+        code: PAYMENT_AUTHORIZATION_USED,
+        content: PAYMENT_AUTHORIZATION_USED_MESSAGE,
+        severity: "unrecoverable",
+      }))
+      return
     }
 
     res.status(422).json(ucpErrorFor(req, {

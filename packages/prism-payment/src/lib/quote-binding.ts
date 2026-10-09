@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import type { PaymentHandlerConfig, X402AcceptEntry } from "./prism-client"
+import { isSupportedX402Version, type PaymentHandlerConfig, type X402AcceptEntry } from "./prism-client"
 import type { SettledPayment, X402PaymentAuthorization } from "../modules/prism-payment/types"
 
 export type QuotedRequirements = X402AcceptEntry & { amount: string }
@@ -8,6 +8,7 @@ type QuoteTerms = {
   x402Version: number
   preparedAmount: string
   preparedCurrency: string
+  preparedResourceUrl: string
   accepts: QuotedRequirements[]
 }
 
@@ -222,6 +223,7 @@ function quoteTermsFromCheckoutData(checkoutData: unknown): QuoteTerms | null {
     x402Version: config.x402Version,
     preparedAmount: checkoutData.preparedAmount,
     preparedCurrency: checkoutData.preparedCurrency,
+    preparedResourceUrl: checkoutData.preparedResourceUrl,
     accepts: config.accepts,
   })
 }
@@ -234,16 +236,24 @@ function asStoredQuote(value: unknown): StoredQuote | null {
 
 function asQuoteTerms(value: unknown): QuoteTerms | null {
   if (!isRecord(value)) return null
-  const { x402Version, preparedAmount, preparedCurrency, accepts } = value
-  if (typeof x402Version !== "number" || !allNonEmpty(preparedAmount, preparedCurrency) || !Array.isArray(accepts)) return null
+  const { x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, accepts } = value
+  if (!isSupportedX402Version(x402Version) || !allNonEmpty(preparedAmount, preparedCurrency, preparedResourceUrl) || !Array.isArray(accepts)) return null
   const entries = accepts.filter(isQuotedRequirements)
   if (entries.length === 0 || entries.length !== accepts.length) return null
-  return { x402Version, preparedAmount: preparedAmount as string, preparedCurrency: preparedCurrency as string, accepts: entries }
+  return {
+    x402Version,
+    preparedAmount: preparedAmount as string,
+    preparedCurrency: preparedCurrency as string,
+    preparedResourceUrl: preparedResourceUrl as string,
+    accepts: entries,
+  }
 }
 
 function sign(terms: QuoteTerms, signingKey: string): string {
-  const { x402Version, preparedAmount, preparedCurrency, accepts } = terms
-  return createHmac("sha256", signingKey).update(canonicalJson({ x402Version, preparedAmount, preparedCurrency, accepts })).digest("hex")
+  const { x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, accepts } = terms
+  return createHmac("sha256", signingKey)
+    .update(canonicalJson({ x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, accepts }))
+    .digest("hex")
 }
 
 function signatureMatches(quote: StoredQuote, signingKey: string): boolean {

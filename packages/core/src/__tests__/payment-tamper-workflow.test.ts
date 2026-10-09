@@ -26,6 +26,12 @@ describe("UCP completion holds the cart lock from the total check to the order",
     expect(at("setup-payment")).toBeLessThan(at("complete-cart-as-step"))
   })
 
+  it("binds the authorization to the cart under the lock, before any payment session or order is created", () => {
+    expect(at("acquire-lock-step")).toBeLessThan(at("reserve-payment-authorization"))
+    expect(at("reserve-payment-authorization")).toBeLessThan(at("setup-payment"))
+    expect(at("reserve-payment-authorization")).toBeLessThan(at("complete-cart-as-step"))
+  })
+
   it("adds shipping and creates the payment collection before the lock, since both take the cart lock themselves", () => {
     expect(at("ensure-shipping-method")).toBeLessThan(at("acquire-lock-step"))
     expect(at("ensure-payment-collection")).toBeLessThan(at("acquire-lock-step"))

@@ -201,6 +201,10 @@ A standard Medusa v2 payment provider that handles the settlement side:
 
 Network, token, recipient and amount come from the quote stored for the cart, never from the credential. A credential is accepted only when the requirements it declares (`paymentPayload.accepted`) match that quote, and Prism is always asked to verify and settle against the quoted requirements. The optional `supported_chains` option limits the quoted networks the provider will settle on; list network names such as `base` or CAIP-2 identifiers such as `eip155:8453`. When it is not set, the quote alone decides the network.
 
+The one-cart-per-authorization rule is enforced by the agentic commerce checkout workflow. Do not enable the Prism provider on regions that are also used by Medusa's own store checkout.
+
+The quote is signed together with the cart resource it was prepared for, so two carts with the same total never share a quote. The x402 version always comes from the quote and must be `1` or `2`; any other value is refused before Prism is called. If the verification call fails or does not answer valid, the payment is not authorized and nothing is settled. With `auto_capture` off, a stored authorization is marked `verified` only when Prism verified it.
+
 A settlement counts only when Prism replies `success: true` with a transaction hash. If the reply also reports a network or amount, they must equal the quoted ones. The provider records the transaction, network, token and settled amount on the payment session (the amount is the quoted amount that the signed authorization was bound to, not a figure Prism reports), and refuses to capture a payment whose settled amount, quote and order total no longer agree.
 
 ## Configuration

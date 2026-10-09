@@ -15,7 +15,7 @@ const credential = {
   x402Version: 2,
   paymentPayload: {
     accepted: { network: "eip155:84532", asset: "0xAsset", amount: "1500000", payTo: "0xMerchant" },
-    payload: { authorization: { value: "1500000", to: "0xMerchant" } },
+    payload: { authorization: { from: "0x2222222222222222222222222222222222222222", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101", value: "1500000", to: "0xMerchant" } },
   },
   paymentRequirements: { scheme: "exact" },
 }
@@ -63,7 +63,7 @@ describe("quote binding with original-era handler ids", () => {
   })
 
   it("keeps rejecting a tampered amount for an original-era instrument", () => {
-    const tampered = { ...credential, paymentPayload: { ...credential.paymentPayload, payload: { authorization: { value: "1", to: "0xMerchant" } } } }
+    const tampered = { ...credential, paymentPayload: { ...credential.paymentPayload, payload: { authorization: { from: "0x2222222222222222222222222222222222222222", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101", value: "1", to: "0xMerchant" } } } }
     expect(checkQuoteBinding(storedQuote, "x402", extractSignedSummary(toBase64(tampered)))).toMatchObject({ status: 422, code: "amount_mismatch" })
   })
 
