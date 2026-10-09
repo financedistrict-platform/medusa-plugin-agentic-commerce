@@ -57,9 +57,8 @@ export function checkQuoteBinding(
   cartMetadata: unknown,
   handlerId: string | undefined,
   signedSummary: SignedPaymentSummary | null,
+  protocol: "ucp" | "acp" = "ucp",
 ): GuardFailure | null {
-  if (!hasPrismQuote(cartMetadata)) return null
-
   if (!signedSummary) {
     return {
       status: 422,
@@ -70,17 +69,11 @@ export function checkQuoteBinding(
 
   const validation = validateSignedAgainstStored(
     signedSummary,
-    readStoredPrismAccepts(cartMetadata, normalizePrismHandlerId(handlerId), "ucp"),
+    readStoredPrismAccepts(cartMetadata, protocol === "ucp" ? normalizePrismHandlerId(handlerId) : handlerId, protocol),
   )
   return validation.ok
     ? null
     : { status: 422, code: validation.code, content: validation.message }
-}
-
-function hasPrismQuote(cartMetadata: unknown): boolean {
-  if (typeof cartMetadata !== "object" || cartMetadata === null) return false
-  const data = (cartMetadata as Record<string, unknown>).prism_checkout_data
-  return typeof data === "object" && data !== null
 }
 
 function invalidInstrument(content: string): GuardFailure {

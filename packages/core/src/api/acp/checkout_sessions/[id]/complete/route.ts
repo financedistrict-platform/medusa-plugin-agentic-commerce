@@ -4,11 +4,8 @@ import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-f
 import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatAcpError, httpStatusToAcpType } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
-import {
-  extractSignedSummary,
-  readStoredPrismAccepts,
-  validateSignedAgainstStored,
-} from "../../../../../lib/validate-signed-amount"
+import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
+import { checkQuoteBinding, isPrismProvider } from "../../../../../lib/ucp-complete-guard"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -35,34 +32,28 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     return
   }
 
-  // Validate the agent's signed EIP-3009 payload against the cart's
-  // stored Prism quote before forwarding to settlement. The ACP
-  // credential is base64-encoded; extractSignedSummary decodes it.
-  // See lib/validate-signed-amount.ts for details.
-  const signedSummary = extractSignedSummary(eip3009Authorization)
-  if (signedSummary) {
-    const query = req.scope.resolve("query") as any
+  const query = req.scope.resolve("query") as any
+
+  if (isPrismProvider(paymentProviderId)) {
     const { data: [cartForValidation] } = await query.graph({
       entity: "cart",
       fields: ["id", "metadata"],
       filters: { id },
     })
-    const storedAccepts = readStoredPrismAccepts(
+    const bindingFailure = checkQuoteBinding(
       cartForValidation?.metadata,
       paymentHandlerId,
+      extractSignedSummary(eip3009Authorization),
       "acp",
     )
-    if (storedAccepts) {
-      const validation = validateSignedAgainstStored(signedSummary, storedAccepts)
-      if (!validation.ok) {
-        res.status(422).json(formatAcpError({
-          type: "invalid_request",
-          code: validation.code,
-          message: validation.message,
-          httpStatus: 422,
-        }))
-        return
-      }
+    if (bindingFailure) {
+      res.status(bindingFailure.status).json(formatAcpError({
+        type: "invalid_request",
+        code: bindingFailure.code,
+        message: bindingFailure.content,
+        httpStatus: bindingFailure.status,
+      }))
+      return
     }
   }
 
@@ -83,7 +74,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     })
 
     // Enrich cart metadata with payment details and completion timestamp
-    const query = req.scope.resolve("query") as any
     const { data: [cartForMeta] } = await query.graph({
       entity: "cart",
       fields: ["id", "metadata", "total", "currency_code"],
