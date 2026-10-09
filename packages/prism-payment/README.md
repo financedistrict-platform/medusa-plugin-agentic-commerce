@@ -201,6 +201,8 @@ A standard Medusa v2 payment provider that handles the settlement side:
 
 Network, token, recipient and amount come from the quote stored for the cart, never from the credential. A credential is accepted only when the requirements it declares (`paymentPayload.accepted`) match that quote, and Prism is always asked to verify and settle against the quoted requirements. The optional `supported_chains` option limits the quoted networks the provider will settle on; list network names such as `base` or CAIP-2 identifiers such as `eip155:8453`. When it is not set, the quote alone decides the network.
 
+A settlement counts only when Prism replies `success: true` with a transaction hash. If the reply also reports a network or amount, they must equal the quoted ones. The provider records the transaction, network, token and settled amount on the payment session (the amount is the quoted amount that the signed authorization was bound to, not a figure Prism reports), and refuses to capture a payment whose settled amount, quote and order total no longer agree.
+
 ## Configuration
 
 ### Prism Gateway

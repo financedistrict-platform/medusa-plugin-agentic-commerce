@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import {
+  ASSET,
   CART_TOTAL,
   NETWORK,
+  QUOTED_VALUE,
   QUOTE_SIGNING_KEY,
   checkoutData,
   credential,
@@ -307,6 +309,163 @@ describe("Prism provider tamper cases", () => {
       provider.capturePayment({ data: { x402_authorization: encode(credential()), amount: CART_TOTAL } } as any),
     ).rejects.toThrow("missing_payment_quote")
     expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+})
+
+describe("Prism settlement is reconciled with the quote", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+  })
+
+  const authorize = async () =>
+    provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+  it.each([
+    ["an empty reply", {}],
+    ["a reply without the success flag", { transaction: "0xtx", network: NETWORK }],
+    ["a success flag that is not boolean true", { success: "true", transaction: "0xtx", network: NETWORK }],
+    ["a success without a transaction hash", { success: true, network: NETWORK }],
+    ["a success with a blank transaction hash", { success: true, transaction: "", network: NETWORK }],
+    ["an explicit failure that still names a transaction", { success: false, transaction: "0xtx", network: NETWORK }],
+  ])("does not authorize on %s", async (_label, reply) => {
+    client.settlePayment.mockResolvedValue(reply)
+
+    const result = await authorize()
+
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toMatch(/^settlement_failed/)
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+  })
+
+  it("keeps the transaction hash when a settled reply does not match the quote, without treating it as settled", async () => {
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xmoved", network: NETWORK, amount: "15.00" })
+
+    const result = await authorize()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ unreconciled_transaction: "0xmoved" })
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+    expect((await provider.getPaymentStatus({ data: result.data } as any)).status).toBe("error")
+  })
+
+  it("names the transaction when a manual capture settles something that does not match the quote", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    const authorized = await authorize()
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xmoved", network: "eip155:1" })
+
+    await expect(provider.capturePayment({ data: authorized.data } as any)).rejects.toThrow("0xmoved")
+  })
+
+  it("does not report a session as captured only because it names a transaction", async () => {
+    const data = { ...((await authorize()).data ?? {}) }
+
+    expect((await provider.getPaymentStatus({ data } as any)).status).toBe("authorized")
+    expect((await provider.getPaymentStatus({ data: { ...data, captured: true } } as any)).status).toBe("captured")
+  })
+
+  it("does not authorize when the settlement reports another network than the quoted one", async () => {
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xtx", network: "eip155:1" })
+
+    const result = await authorize()
+
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("settlement_failed: settled_network_mismatch")
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+  })
+
+  it.each([["1"], ["1499999"], [1500001]])("does not authorize when the settlement reports %s instead of the quoted amount", async (amount) => {
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xtx", network: NETWORK, amount })
+
+    const result = await authorize()
+
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("settlement_failed: settled_amount_mismatch")
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+  })
+
+  it("records the settled amount, token and network next to the transaction", async () => {
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xtx", network: NETWORK, amount: QUOTED_VALUE })
+
+    const result = await authorize()
+
+    expect(result.status).toBe("authorized")
+    expect(result.data).toMatchObject({
+      prism_tx_id: "0xtx",
+      transaction_network: NETWORK,
+      settled_amount: QUOTED_VALUE,
+      settled_asset: ASSET,
+    })
+  })
+
+  it("does not capture a manually settled payment on a reply without a transaction hash", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    const authorized = await authorize()
+    client.settlePayment.mockResolvedValue({ success: true, network: NETWORK })
+
+    await expect(provider.capturePayment({ data: authorized.data } as any)).rejects.toThrow("missing_transaction_hash")
+  })
+
+  it("records the settled amount when a manual capture settles", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    const authorized = await authorize()
+
+    const captured = await provider.capturePayment({ data: authorized.data } as any)
+
+    expect(captured.data).toMatchObject({ prism_tx_id: "0xtx", settled_amount: QUOTED_VALUE, settled_asset: ASSET, captured: true })
+  })
+
+  describe("right before the payment is marked captured", () => {
+    const settled = async () => ((await authorize()).data ?? {}) as Record<string, unknown>
+
+    it("captures a settlement that matches the quote and the order total", async () => {
+      const data = await settled()
+
+      const captured = await provider.capturePayment({ data } as any)
+
+      expect(captured.data).toMatchObject({ captured: true, prism_tx_id: "0xtx" })
+    })
+
+    it("refuses to capture when the order total moved after the settlement", async () => {
+      const data = await settled()
+
+      await expect(provider.capturePayment({ data: { ...data, amount: CART_TOTAL * 100 } } as any)).rejects.toThrow("quote_total_mismatch")
+    })
+
+    it("refuses to capture when the settled amount is below the quoted amount", async () => {
+      const data = await settled()
+
+      await expect(provider.capturePayment({ data: { ...data, settled_amount: "1" } } as any)).rejects.toThrow("settled_amount_mismatch")
+    })
+
+    it("refuses to capture a settlement that recorded no settled amount", async () => {
+      const { settled_amount: _dropped, ...data } = await settled()
+
+      await expect(provider.capturePayment({ data } as any)).rejects.toThrow("settled_amount_mismatch")
+    })
+
+    it("refuses to capture a settlement on a token or network that was never quoted", async () => {
+      const data = await settled()
+
+      await expect(
+        provider.capturePayment({ data: { ...data, settled_asset: "0x4444444444444444444444444444444444444444" } } as any),
+      ).rejects.toThrow("settled_payment_not_quoted")
+      await expect(
+        provider.capturePayment({ data: { ...data, transaction_network: "eip155:1" } } as any),
+      ).rejects.toThrow("settled_payment_not_quoted")
+    })
+
+    it("refuses to capture when the stored quote is missing or was rewritten", async () => {
+      const data = await settled()
+      const quote = data.payment_quote as Record<string, unknown>
+
+      await expect(provider.capturePayment({ data: { ...data, payment_quote: undefined } } as any)).rejects.toThrow("missing_payment_quote")
+      await expect(
+        provider.capturePayment({ data: { ...data, payment_quote: { ...quote, preparedAmount: "1" } } } as any),
+      ).rejects.toThrow("invalid_quote_signature")
+    })
   })
 })
 

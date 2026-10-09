@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
-import { credential as quotedCredential, encode, quotedSession } from "./helpers/quoted-payment"
+import { credential as quotedCredential, encode, quotedSession, settledPayment } from "./helpers/quoted-payment"
 
 const credential = { type: "x402", ...quotedCredential() }
 
@@ -16,7 +16,7 @@ describe("PrismPaymentProviderService original-era instruments", () => {
       api_key: "key",
       verify_before_settle: false,
     } as any)
-    settle = vi.fn().mockResolvedValue({ success: true, transaction: "0xtx", network: "base" })
+    settle = vi.fn().mockResolvedValue({ success: true, transaction: "0xtx", network: settledPayment.network, settled: settledPayment })
     ;(provider as any).settleWithPrism = settle
   })
 

@@ -26,12 +26,15 @@ import type {
   X402PaymentAuthorization,
   PrismSettleResponse,
   PrismVerifyResponse,
+  SettledPayment,
 } from "./types"
 import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
 import { PrismClient } from "../../lib/prism-client"
 import { PRISM_CHECKOUT_DATA_KEY } from "../prism-payment-handler/service"
 import {
   bindAuthorizationToQuote,
+  reconcileSettlement,
+  settledPaymentMismatch,
   storedQuoteFromCheckoutData,
   type QuotedRequirements,
 } from "../../lib/quote-binding"
@@ -42,6 +45,20 @@ type SettlementTarget = {
   x402Version: number
   requirements: QuotedRequirements
   paymentPayload: Record<string, unknown>
+}
+
+function settledPaymentData(settled: SettledPayment) {
+  return {
+    transaction_reference: settled.transaction,
+    transaction_network: settled.network,
+    prism_tx_id: settled.transaction,
+    settled_amount: settled.amount,
+    settled_asset: settled.asset,
+  }
+}
+
+function unreconciledTransaction(settleResult: PrismSettleResponse) {
+  return settleResult.transaction ? { unreconciled_transaction: settleResult.transaction } : {}
 }
 
 class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentConfig> {
@@ -179,19 +196,18 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
               ...data,
               error: `settlement_failed: ${reason}`,
               error_message: reason,
+              ...unreconciledTransaction(settleResult),
             },
             status: "error" as PaymentSessionStatus,
           }
         }
 
-        const settledNetwork = settleResult.network ?? network
+        const settled = settleResult.settled!
         return {
           data: {
             ...data,
-            transaction_reference: settleResult.transaction,
-            transaction_network: settledNetwork,
-            prism_tx_id: settleResult.transaction,
-            network: settledNetwork,
+            ...settledPaymentData(settled),
+            network: settled.network,
             payer: settleResult.payer ?? eip3009.from,
             signed_value: eip3009.value,
           },
@@ -224,6 +240,11 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     const data = (input.data || {}) as Record<string, unknown>
 
     if (data.prism_tx_id) {
+      const mismatch = settledPaymentMismatch(data, this.client.getApiKey())
+      if (mismatch) {
+        console.error(`[prism-payment] Refusing to capture settlement ${String(data.prism_tx_id)}: ${mismatch}`)
+        throw new Error(`[prism-payment] Capture failed: ${mismatch}`)
+      }
       return { data: { ...data, captured: true } }
     }
 
@@ -244,17 +265,19 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
       const settleResult = await this.settleWithPrism(authorization, binding)
       if (!settleResult.success) {
+        const unreconciled = unreconciledTransaction(settleResult)
+        if (unreconciled.unreconciled_transaction) {
+          console.error(`[prism-payment] Settlement reported transaction ${unreconciled.unreconciled_transaction} that does not match the quote: ${settleResult.errorReason}`)
+        }
         throw new Error(
-          `Settlement failed: ${settleResult.errorReason ?? "unknown"}`
+          `Settlement failed: ${settleResult.errorReason ?? "unknown"}${unreconciled.unreconciled_transaction ? ` (transaction ${unreconciled.unreconciled_transaction})` : ""}`
         )
       }
 
       return {
         data: {
           ...data,
-          transaction_reference: settleResult.transaction,
-          transaction_network: settleResult.network,
-          prism_tx_id: settleResult.transaction,
+          ...settledPaymentData(settleResult.settled!),
           captured: true,
         },
       }
@@ -308,9 +331,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     const data = (input.data || {}) as Record<string, unknown>
 
     if (data.error) return { data, status: "error" as PaymentSessionStatus }
-    if (data.captured || data.prism_tx_id) return { data, status: "captured" as PaymentSessionStatus }
+    if (data.captured === true) return { data, status: "captured" as PaymentSessionStatus }
     if (data.canceled) return { data, status: "canceled" as PaymentSessionStatus }
-    if (data.verified || data.x402_authorization) return { data, status: "authorized" as PaymentSessionStatus }
+    if (data.prism_tx_id || data.verified || data.x402_authorization) return { data, status: "authorized" as PaymentSessionStatus }
 
     return { data, status: "pending" as PaymentSessionStatus }
   }
@@ -370,13 +393,23 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       }
       return undefined
     }
-    return {
-      success: raw.success !== false,
-      payer: pickString("payer"),
-      transaction: pickString("transaction", "transactionHash", "facilitatorTransactionId"),
-      network: pickString("network"),
-      errorReason: pickString("errorReason", "errorMessage", "errorCode"),
+    const transaction = pickString("transaction", "transactionHash", "facilitatorTransactionId")
+    const network = pickString("network")
+    const payer = pickString("payer")
+    const reportedReason = pickString("errorReason", "errorMessage", "errorCode")
+
+    if (raw.success !== true) {
+      return { success: false, payer, transaction, network, errorReason: reportedReason ?? "settlement_not_confirmed" }
     }
+    const reconciled = reconcileSettlement(target.requirements, {
+      transaction,
+      network,
+      amount: raw.amount ?? raw.value,
+    })
+    if (!reconciled.ok) {
+      return { success: false, payer, transaction, network, errorReason: reconciled.error }
+    }
+    return { success: true, payer, transaction, network, settled: reconciled.settled }
   }
 }
 
