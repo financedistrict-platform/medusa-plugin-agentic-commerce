@@ -314,6 +314,8 @@ import {
 
 An unknown version or negotiation value stops the store at boot. So does a missing `payment_provider_id`, or the system provider outside the local-testing case above.
 
+Point `payment_provider_id` only at a provider that verifies the agent's credential before it approves a payment. In production, also remove `pp_system_default` from every region: Medusa's own store routes can still complete a cart with any provider enabled on its region.
+
 ### Environment Variables
 
 | Variable | Maps to |

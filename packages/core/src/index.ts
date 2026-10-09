@@ -29,6 +29,7 @@
  *         store_name: "My Store",
  *         storefront_url: process.env.STOREFRONT_URL,
  *         api_key: process.env.AGENTIC_COMMERCE_API_KEY,
+ *         payment_provider_id: "pp_prism_prism",
  *         payment_handler_adapters: ["prismPaymentHandler"],
  *       },
  *     },
