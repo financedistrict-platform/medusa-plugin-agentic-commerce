@@ -58,6 +58,38 @@ describe("Prism provider tamper cases", () => {
     expect(client.settlePayment).not.toHaveBeenCalled()
   }
 
+  it("rejects a buyer-created session that carries no payment credential instead of approving it", async () => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { prism_checkout_data: checkoutData },
+    } as any)
+
+    await expectRejected(initiated.data as Record<string, unknown>, "missing_payment_authorization")
+  })
+
+  it("refuses to capture a session that was never settled and holds no authorization", async () => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { prism_checkout_data: checkoutData, prism_tx_id: "0xforged", captured: true, verified: true },
+    } as any)
+
+    await expect(provider.capturePayment({ data: initiated.data } as any)).rejects.toThrow("missing_payment_authorization")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("reports a buyer-created session as pending even when it names a settlement", async () => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { prism_tx_id: "0xforged", captured: true, verified: true, x402_authorization: "forged" },
+    } as any)
+
+    const status = await provider.getPaymentStatus({ data: initiated.data } as any)
+    expect(status.status).toBe("pending")
+  })
+
   it("rejects an authorization when the session carries no stored quote", async () => {
     await expectRejected({ eip3009_authorization: encode(credential()), amount: CART_TOTAL }, "missing_payment_quote")
   })

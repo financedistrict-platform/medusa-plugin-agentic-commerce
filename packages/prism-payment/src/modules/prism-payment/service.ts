@@ -36,6 +36,8 @@ import {
   type QuotedRequirements,
 } from "../../lib/quote-binding"
 
+const MISSING_PAYMENT_AUTHORIZATION = "missing_payment_authorization"
+
 type SettlementTarget = {
   x402Version: number
   requirements: QuotedRequirements
@@ -106,8 +108,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     const authorizationB64 = data.eip3009_authorization as string | undefined
 
     if (!authorizationB64) {
-      console.warn("[prism-payment] No EIP-3009 authorization provided, auto-authorizing")
-      return { data, status: "authorized" as PaymentSessionStatus }
+      return {
+        data: { ...data, error: MISSING_PAYMENT_AUTHORIZATION },
+        status: "error" as PaymentSessionStatus,
+      }
     }
 
     let authorization: X402PaymentAuthorization
@@ -229,7 +233,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
     const authorizationB64 = data.x402_authorization as string | undefined
     if (!authorizationB64) {
-      return { data: { ...data, captured: true } }
+      throw new Error(`[prism-payment] Capture failed: ${MISSING_PAYMENT_AUTHORIZATION}`)
     }
 
     try {

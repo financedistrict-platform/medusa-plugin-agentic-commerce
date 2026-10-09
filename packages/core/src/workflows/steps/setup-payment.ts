@@ -3,6 +3,7 @@ import { ContainerRegistrationKeys, MedusaError } from "@medusajs/framework/util
 import {
   createPaymentCollectionForCartWorkflow,
   createPaymentSessionsWorkflow,
+  deletePaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
 
 const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
@@ -94,22 +95,24 @@ export const setupPaymentStep = createStep(
       }
     }
 
-    // Check if there's already an active payment session
-    const existingSessions = cart?.payment_collection?.payment_sessions || []
-    const hasActiveSession = existingSessions.some(
-      (s: any) => s.status === "pending" || s.status === "authorized"
-    )
+    const staleSessionIds = (cart?.payment_collection?.payment_sessions || [])
+      .map((session: { id?: string } | null) => session?.id)
+      .filter((id: string | undefined): id is string => !!id)
 
-    if (!hasActiveSession) {
-      await createPaymentSessionsWorkflow(container).run({
-        input: {
-          payment_collection_id: paymentCollectionId,
-          provider_id: input.payment_provider_id,
-          data: paymentSessionDataFor(input, cart?.metadata),
-          context: {},
-        },
+    if (staleSessionIds.length) {
+      await deletePaymentSessionsWorkflow(container).run({
+        input: { ids: staleSessionIds },
       })
     }
+
+    await createPaymentSessionsWorkflow(container).run({
+      input: {
+        payment_collection_id: paymentCollectionId,
+        provider_id: input.payment_provider_id,
+        data: paymentSessionDataFor(input, cart?.metadata),
+        context: {},
+      },
+    })
 
     return new StepResponse(
       {
