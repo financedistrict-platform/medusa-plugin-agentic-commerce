@@ -58,7 +58,7 @@ const forgedQuote = prismQuote("1", ATTACKER, 0.01)
 
 function credential(value: string, to: string) {
   const payload = {
-    accepted: { network: "eip155:84532", asset: "0xAsset" },
+    accepted: { network: "eip155:84532", asset: "0xAsset", amount: value, payTo: to },
     payload: {
       signature: "0xsig",
       authorization: { from: "0xBuyer", to, value, validAfter: "0", validBefore: "9999999999", nonce: "0x01" },

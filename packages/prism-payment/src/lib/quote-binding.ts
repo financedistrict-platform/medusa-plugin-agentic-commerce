@@ -20,6 +20,8 @@ export type QuoteBindingError =
   | "quote_currency_mismatch"
   | "missing_eip3009_fields"
   | "no_matching_quote_entry"
+  | "accepted_requirements_mismatch"
+  | "unsupported_chain"
   | "amount_mismatch"
   | "wrong_recipient"
   | "authorization_expired"
@@ -27,11 +29,21 @@ export type QuoteBindingError =
   | "invalid_nonce"
 
 export type QuoteBinding =
-  | { ok: true; x402Version: number; requirements: QuotedRequirements }
+  | { ok: true; x402Version: number; requirements: QuotedRequirements; paymentPayload: Record<string, unknown> }
   | { ok: false; error: QuoteBindingError }
 
 const BYTES32_HEX = /^0x[0-9a-fA-F]{64}$/
 const UNSIGNED_INTEGER = /^\d+$/
+
+const CHAIN_ALIASES: Record<string, string> = {
+  ethereum: "eip155:1",
+  optimism: "eip155:10",
+  polygon: "eip155:137",
+  base: "eip155:8453",
+  arbitrum: "eip155:42161",
+  sepolia: "eip155:11155111",
+  "base-sepolia": "eip155:84532",
+}
 
 export function paymentConfigFromCheckoutData(checkoutData: unknown): PaymentHandlerConfig | null {
   if (!isRecord(checkoutData)) return null
@@ -65,6 +77,7 @@ export function bindAuthorizationToQuote(
   sessionCurrency: unknown,
   nowSeconds: number,
   signingKey: string,
+  allowedChains?: readonly string[],
 ): QuoteBinding {
   const quote = asStoredQuote(storedQuote)
   if (!quote) return fail("missing_payment_quote")
@@ -73,29 +86,68 @@ export function bindAuthorizationToQuote(
   if (!sameCurrency(quote.preparedCurrency, sessionCurrency)) return fail("quote_currency_mismatch")
 
   const signed = authorization.paymentPayload?.payload?.authorization
-  if (!signed || !allNonEmpty(signed.from, signed.to, signed.value, signed.validAfter, signed.validBefore, signed.nonce)) {
+  if (!signed || !allNonEmpty(authorization.paymentPayload?.payload?.signature, signed.from, signed.to, signed.value, signed.validAfter, signed.validBefore, signed.nonce)) {
     return fail("missing_eip3009_fields")
   }
 
-  const requirements = quotedEntryFor(authorization, quote)
-  if (!requirements) return fail("no_matching_quote_entry")
+  const declared = declaredRequirements(authorization)
+  const requirements = declared ? quotedEntryFor(declared, quote) : null
+  if (!declared || !requirements) return fail("no_matching_quote_entry")
+  if (!declaresQuotedTerms(declared, requirements)) return fail("accepted_requirements_mismatch")
+  if (!chainAllowed(requirements.network, allowedChains)) return fail("unsupported_chain")
   if (!sameAtomicValue(requirements.amount, signed.value)) return fail("amount_mismatch")
   if (!sameAddress(requirements.payTo, signed.to)) return fail("wrong_recipient")
   if (!UNSIGNED_INTEGER.test(signed.validBefore) || Number(signed.validBefore) <= nowSeconds) return fail("authorization_expired")
   if (!UNSIGNED_INTEGER.test(signed.validAfter) || Number(signed.validAfter) > nowSeconds) return fail("authorization_not_yet_valid")
   if (!BYTES32_HEX.test(signed.nonce)) return fail("invalid_nonce")
 
-  return { ok: true, x402Version: quote.x402Version, requirements }
+  return { ok: true, x402Version: quote.x402Version, requirements, paymentPayload: quotedPayload(authorization, quote, requirements) }
 }
 
-function quotedEntryFor(authorization: X402PaymentAuthorization, quote: StoredQuote): QuotedRequirements | null {
-  const payload = authorization.paymentPayload as unknown as Record<string, unknown>
-  const accepted = isRecord(payload.accepted) ? payload.accepted : {}
-  const buyerRequirements = isRecord(authorization.paymentRequirements) ? authorization.paymentRequirements : {}
-  const network = firstString(accepted.network, payload.network)
-  const asset = firstString(accepted.asset, buyerRequirements.asset)
+function declaredRequirements(authorization: X402PaymentAuthorization): Record<string, unknown> | null {
+  const payload = authorization.paymentPayload as unknown as Record<string, unknown> | undefined
+  return isRecord(payload?.accepted) ? payload.accepted : null
+}
+
+function quotedEntryFor(declared: Record<string, unknown>, quote: StoredQuote): QuotedRequirements | null {
+  const network = firstString(declared.network)
+  const asset = firstString(declared.asset)
   if (!network || !asset) return null
   return quote.accepts.find((entry) => entry.network === network && sameAddress(entry.asset, asset)) ?? null
+}
+
+function declaresQuotedTerms(declared: Record<string, unknown>, quoted: QuotedRequirements): boolean {
+  return (
+    typeof declared.scheme === "string" &&
+    declared.scheme.toLowerCase() === quoted.scheme.toLowerCase() &&
+    typeof declared.amount === "string" &&
+    sameAtomicValue(declared.amount, quoted.amount) &&
+    typeof declared.payTo === "string" &&
+    sameAddress(declared.payTo, quoted.payTo)
+  )
+}
+
+function quotedPayload(
+  authorization: X402PaymentAuthorization,
+  quote: StoredQuote,
+  requirements: QuotedRequirements,
+): Record<string, unknown> {
+  const { signature, authorization: signed } = authorization.paymentPayload.payload
+  const { from, to, value, validAfter, validBefore, nonce } = signed
+  return {
+    x402Version: quote.x402Version,
+    accepted: requirements,
+    payload: { signature, authorization: { from, to, value, validAfter, validBefore, nonce } },
+  }
+}
+
+function chainAllowed(network: string, allowedChains: readonly string[] | undefined): boolean {
+  return allowedChains === undefined || allowedChains.some((chain) => chainKey(chain) === chainKey(network))
+}
+
+function chainKey(chain: string): string {
+  const key = chain.trim().toLowerCase()
+  return CHAIN_ALIASES[key] ?? key
 }
 
 function quoteTermsFromCheckoutData(checkoutData: unknown): QuoteTerms | null {

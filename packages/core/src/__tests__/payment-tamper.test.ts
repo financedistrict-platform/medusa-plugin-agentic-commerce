@@ -71,7 +71,7 @@ function containerFor(services: Record<string, unknown>, quote: unknown) {
 
 function signedPayload(value: string) {
   return {
-    accepted: { network: "eip155:84532", asset: "0xAsset" },
+    accepted: { network: "eip155:84532", asset: "0xAsset", amount: QUOTED_AMOUNT, payTo: "0xMerchant" },
     payload: {
       signature: "0xsig",
       authorization: { from: "0xBuyer", to: "0xMerchant", value, validAfter: "0", validBefore: "9999999999", nonce: "0x01" },
@@ -205,6 +205,74 @@ describe("UCP complete tamper cases", () => {
     expect(completeRun).toHaveBeenCalledTimes(1)
     expect(settledSummary()).toMatchObject({ value: QUOTED_AMOUNT })
     expect(settledAuthorization()).toBe(authorization)
+  })
+})
+
+describe("declared payment requirements checked against the quote", () => {
+  const quotedAccepted = { network: "eip155:84532", asset: "0xAsset", amount: QUOTED_AMOUNT, payTo: "0xMerchant" }
+
+  function authorizationDeclaring(accepted: Record<string, unknown> | undefined, extra: Record<string, unknown> = {}) {
+    const payload = signedPayload(QUOTED_AMOUNT)
+    const { accepted: _declared, ...signedOnly } = payload
+    const paymentPayload = { ...(accepted ? { accepted } : {}), ...signedOnly, ...extra }
+    return Buffer.from(JSON.stringify({ x402Version: 2, paymentPayload })).toString("base64")
+  }
+
+  it("settles when the declared requirements equal the quote", async () => {
+    const { req, res } = setup({ type: "x402", authorization: authorizationDeclaring(quotedAccepted) })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["name another amount", { amount: "1" }],
+    ["name another recipient", { payTo: "0xAttacker" }],
+    ["leave out the amount", { amount: undefined }],
+    ["leave out the recipient", { payTo: undefined }],
+  ])("rejects declared requirements that %s", async (_label, change) => {
+    const { req, res } = setup({ type: "x402", authorization: authorizationDeclaring({ ...quotedAccepted, ...change }) })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("rejects a credential that declares no requirements", async () => {
+    const { req, res } = setup({ type: "x402", authorization: authorizationDeclaring(undefined, { network: "eip155:84532" }) })
+
+    await ucpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
+  })
+
+  it("rejects declared requirements on a network or token the quote does not list", async () => {
+    for (const change of [{ network: "eip155:8453" }, { asset: "0xMainnetUsdc" }]) {
+      const { req, res } = setup({ type: "x402", authorization: authorizationDeclaring({ ...quotedAccepted, ...change }) })
+
+      await ucpComplete(req, res)
+
+      expect(completeRun).not.toHaveBeenCalled()
+      expect(res.statusCode).toBe(422)
+    }
+  })
+
+  it("rejects declared requirements that differ from the quote on the ACP route", async () => {
+    const { req, res } = setup({})
+    req.validatedBody = {
+      payment_data: {
+        handler_id: HANDLER_ID,
+        instrument: { credential: { authorization: authorizationDeclaring({ ...quotedAccepted, amount: "1" }) } },
+      },
+    }
+
+    await acpComplete(req, res)
+
+    expect(completeRun).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(422)
   })
 })
 
