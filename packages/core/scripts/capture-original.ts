@@ -25,7 +25,7 @@ const AgenticCommerceService = requireFrom(`${coreRoot}/modules/agentic-commerce
 const ucpFormatter = requireFrom(`${coreRoot}/lib/formatters/ucp.js`)
 const errorFormatters = requireFrom(`${coreRoot}/lib/error-formatters.js`)
 
-const storeOptions = { store_name: "Demo Store", storefront_url: "https://store.test" }
+const storeOptions = { store_name: "Demo Store", storefront_url: "https://store.test", payment_provider_id: "pp_prism_prism" }
 const service = new AgenticCommerceService({}, lane === "prism"
   ? { ...storeOptions, payment_handler_adapters: ["prismPaymentHandler"] }
   : storeOptions)

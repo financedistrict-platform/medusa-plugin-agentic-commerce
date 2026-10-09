@@ -34,6 +34,7 @@ export function serialize(value: unknown): string {
 export function createStoreService(options: RenderOptions) {
   const service = new AgenticCommerceService({}, {
     store_name: "Demo Store",
+    payment_provider_id: "pp_prism_prism",
     storefront_url: "https://store.test",
     ucp_version: options.version,
     ucp_supported_versions: options.supported ?? [],
