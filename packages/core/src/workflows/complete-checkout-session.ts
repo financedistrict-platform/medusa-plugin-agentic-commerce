@@ -12,6 +12,7 @@ import {
 import { validateCheckoutPrerequisitesStep } from "./steps/validate-checkout-prerequisites"
 import { ensureShippingMethodStep } from "./steps/ensure-shipping-method"
 import { setupPaymentStep } from "./steps/setup-payment"
+import { paymentToCapture } from "../lib/payment-to-capture"
 
 type CompleteCheckoutSessionInput = {
   cart_id: string
@@ -80,14 +81,19 @@ const completeCheckoutSessionWorkflow = createWorkflow(
     // real on-chain settlement.
     const paymentQuery = useQueryGraphStep({
       entity: "cart",
-      fields: ["id", "payment_collection.payments.id"],
+      fields: [
+        "id",
+        "payment_collection.payments.id",
+        "payment_collection.payments.provider_id",
+        "payment_collection.payments.captured_at",
+        "payment_collection.payments.canceled_at",
+      ],
       filters: { id: input.cart_id },
     }).config({ name: "fetch-payment-id-for-capture" })
 
-    const paymentId = transform(paymentQuery, (q) => {
-      const payments = (q.data?.[0] as any)?.payment_collection?.payments || []
-      return payments[0]?.id || null
-    })
+    const paymentId = transform({ paymentQuery, input }, ({ paymentQuery, input }) =>
+      paymentToCapture(paymentQuery as Parameters<typeof paymentToCapture>[0], input.payment_provider_id)
+    )
 
     when({ paymentId }, ({ paymentId }) => !!paymentId).then(() => {
       capturePaymentWorkflow.runAsStep({
