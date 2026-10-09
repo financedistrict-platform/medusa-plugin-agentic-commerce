@@ -44,6 +44,9 @@ export type Overrides = {
   validAfter?: string
   validBefore?: string | undefined
   nonce?: string | undefined
+  declared?: Record<string, unknown>
+  omitAccepted?: boolean
+  legacyNetwork?: string
 }
 
 export function credential(overrides: Overrides = {}) {
@@ -63,12 +66,14 @@ export function credential(overrides: Overrides = {}) {
     ...quotedEntry,
     network: overrides.network ?? NETWORK,
     asset: overrides.asset ?? ASSET,
-    amount: overrides.value ?? QUOTED_VALUE,
-    payTo: overrides.to ?? MERCHANT,
+    ...overrides.declared,
   }
+  const paymentPayload: Record<string, unknown> = { x402Version: 2, payload: { signature: "0xsig", authorization } }
+  if (!overrides.omitAccepted) paymentPayload.accepted = accepted
+  if (overrides.legacyNetwork) paymentPayload.network = overrides.legacyNetwork
   return {
     x402Version: 2,
-    paymentPayload: { x402Version: 2, accepted, payload: { signature: "0xsig", authorization } },
+    paymentPayload,
     paymentRequirements: { ...accepted, amount: "1" },
   }
 }

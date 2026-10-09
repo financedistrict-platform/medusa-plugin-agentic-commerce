@@ -17,6 +17,10 @@ export type SignedPaymentSummary = {
   value: string
   /** EIP-3009 signed recipient (`authorization.to`) — case-insensitive */
   to: string
+  /** Amount named by the declared requirements (`accepted.amount`) */
+  declaredAmount: string
+  /** Recipient named by the declared requirements (`accepted.payTo`) — case-insensitive */
+  declaredPayTo: string
 }
 
 export type StoredAcceptEntry = {
@@ -36,6 +40,7 @@ export type ValidationErrorCode =
   | "no_matching_accepts_entry"
   | "amount_mismatch"
   | "wrong_recipient"
+  | "declared_requirements_mismatch"
 
 export function extractSignedSummary(authorizationB64: string): SignedPaymentSummary | null {
   const decoded = decodeBase64Json(authorizationB64)
@@ -47,9 +52,11 @@ export function extractSignedSummary(authorizationB64: string): SignedPaymentSum
   const asset = readNonEmptyString(accepted, "asset")
   const value = readNonEmptyString(authz, "value")
   const to = readNonEmptyString(authz, "to")
+  const declaredAmount = readNonEmptyString(accepted, "amount")
+  const declaredPayTo = readNonEmptyString(accepted, "payTo")
 
-  if (!network || !asset || !value || !to || !ATOMIC_UNITS.test(value)) return null
-  return { network, asset, value, to }
+  if (!network || !asset || !value || !to || !declaredAmount || !declaredPayTo || !ATOMIC_UNITS.test(value)) return null
+  return { network, asset, value, to, declaredAmount, declaredPayTo }
 }
 
 const ATOMIC_UNITS = /^[0-9]+$/
@@ -154,6 +161,14 @@ export function validateSignedAgainstStored(
       ok: false,
       code: "no_matching_accepts_entry",
       message: `Signed payment uses (${summary.network}, ${summary.asset}) but the cart was quoted for: ${quoted}.`,
+    }
+  }
+
+  if (!sameAtomicValue(match.amount, summary.declaredAmount) || !sameAddress(match.payTo, summary.declaredPayTo)) {
+    return {
+      ok: false,
+      code: "declared_requirements_mismatch",
+      message: `The payment requirements declared in the credential do not match the cart's payment quote.`,
     }
   }
 

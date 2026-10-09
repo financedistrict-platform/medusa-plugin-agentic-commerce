@@ -41,14 +41,15 @@ const MISSING_PAYMENT_AUTHORIZATION = "missing_payment_authorization"
 type SettlementTarget = {
   x402Version: number
   requirements: QuotedRequirements
+  paymentPayload: Record<string, unknown>
 }
 
 class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentConfig> {
   static identifier = "prism"
 
   private client: PrismClient
-  private supportedChains: string[]
   private supportedAssets: string[]
+  private allowedChains: string[] | undefined
   private autoCapture: boolean
   private verifyBeforeSettle: boolean
 
@@ -56,8 +57,8 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     super(cradle, config)
 
     this.client = new PrismClient({ apiUrl: config.api_url, apiKey: config.api_key })
-    this.supportedChains = config.supported_chains || ["base"]
     this.supportedAssets = config.supported_assets || ["usdc"]
+    this.allowedChains = config.supported_chains
     this.autoCapture = config.auto_capture !== false
     this.verifyBeforeSettle = config.verify_before_settle !== false
   }
@@ -77,7 +78,6 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       prism_session_id: sessionId,
       amount: input.amount,
       currency_code: input.currency_code,
-      supported_chains: this.supportedChains,
       supported_assets: this.supportedAssets,
     }
 
@@ -92,6 +92,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     }
     if (inputData.ucp_version) {
       data.ucp_version = inputData.ucp_version
+    }
+    if (this.allowedChains) {
+      data.supported_chains = this.allowedChains
     }
     const paymentQuote = storedQuoteFromCheckoutData(inputData[PRISM_CHECKOUT_DATA_KEY])
     if (paymentQuote) {
@@ -142,14 +145,6 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
     const eip3009 = authorization.paymentPayload.payload.authorization
 
-    const network = authorization.paymentPayload.network?.toLowerCase()
-    if (network && !this.supportedChains.includes(network)) {
-      return {
-        data: { ...data, error: `unsupported_chain: ${network}` },
-        status: "error" as PaymentSessionStatus,
-      }
-    }
-
     const binding = this.bindToQuote(authorization, data)
     if (!binding.ok) {
       return {
@@ -157,6 +152,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         status: "error" as PaymentSessionStatus,
       }
     }
+    const network = binding.requirements.network.toLowerCase()
 
     if (this.verifyBeforeSettle) {
       try {
@@ -333,13 +329,14 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       data.currency_code,
       Math.floor(Date.now() / 1000),
       this.client.getApiKey(),
+      this.allowedChains,
     )
   }
 
-  private paymentRequest(authorization: X402PaymentAuthorization, target: SettlementTarget) {
+  private paymentRequest(target: SettlementTarget) {
     return {
       x402Version: target.x402Version,
-      paymentPayload: authorization.paymentPayload,
+      paymentPayload: target.paymentPayload,
       paymentRequirements: target.requirements,
     }
   }
@@ -348,7 +345,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     authorization: X402PaymentAuthorization,
     target: SettlementTarget,
   ): Promise<PrismVerifyResponse> {
-    const raw = await this.client.verifyPayment(this.paymentRequest(authorization, target))
+    const raw = await this.client.verifyPayment(this.paymentRequest(target))
     return {
       isValid: raw.isValid === true || raw.valid === true,
       payer: typeof raw.payer === "string" ? raw.payer : undefined,
@@ -365,7 +362,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     authorization: X402PaymentAuthorization,
     target: SettlementTarget,
   ): Promise<PrismSettleResponse> {
-    const raw = await this.client.settlePayment(this.paymentRequest(authorization, target))
+    const raw = await this.client.settlePayment(this.paymentRequest(target))
     const pickString = (...keys: string[]): string | undefined => {
       for (const k of keys) {
         const v = raw[k]
