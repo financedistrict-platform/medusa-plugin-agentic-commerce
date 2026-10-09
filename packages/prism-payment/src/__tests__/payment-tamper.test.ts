@@ -162,6 +162,33 @@ describe("Prism provider tamper cases", () => {
     await expectRejected(await sessionData(provider, credential(), CART_TOTAL, signed), "missing_payment_quote")
   })
 
+  const quotePreparedFor = (preparedAmount: string) => {
+    const unsigned = { ...unsignedCheckoutData(), preparedAmount }
+    return { ...unsigned, quoteSignature: quoteSignatureFor(unsigned, QUOTE_SIGNING_KEY) }
+  }
+
+  it("rejects a session total that differs from the quote only beyond double precision", async () => {
+    await expectRejected(
+      await sessionData(provider, credential(), "9007199254740992" as never, quotePreparedFor("9007199254740993")),
+      "quote_total_mismatch",
+    )
+  })
+
+  it("rejects a session total that differs from the quote only in a far decimal place", async () => {
+    await expectRejected(
+      await sessionData(provider, credential(), "15.0000000000000001" as never, quotePreparedFor("15")),
+      "quote_total_mismatch",
+    )
+  })
+
+  it("accepts a very large session total written in exponent form when it equals the quote", async () => {
+    const result = await provider.authorizePayment({
+      data: await sessionData(provider, credential(), 1e21, quotePreparedFor("1000000000000000000000")),
+    } as any)
+
+    expect(result.status).toBe("authorized")
+  })
+
   it("rejects a stored quote whose currency was rewritten after it was signed", async () => {
     const forged = { ...checkoutData, preparedCurrency: "jpy" }
     await expectRejected(await sessionData(provider, credential(), CART_TOTAL, forged, "jpy"), "invalid_quote_signature")
@@ -542,6 +569,70 @@ describe("Prism quote produced by the handler", () => {
     await prepare(handlerWith(preparePayment), { prism_checkout_data: checkoutData })
 
     expect(preparePayment).toHaveBeenCalledTimes(1)
+  })
+
+  const prepareCart = (adapter: PrismPaymentHandlerAdapter, cart: Record<string, unknown>, stored?: unknown) =>
+    adapter.prepareCheckoutPayment({
+      cart: { id: "cart_1", currency_code: "usd", metadata: {}, ...cart },
+      stored,
+      checkoutBaseUrl: "https://shop.test/ucp/checkout-sessions",
+      storeName: "Shop",
+      ucpVersion: "2026-04-08",
+      container: { resolve: () => ({ updateCarts: vi.fn() }) },
+    } as any)
+
+  it.each([
+    ["a very large total", 1e21, "1000000000000000000000"],
+    ["a very small total", 1e-7, "0.0000001"],
+    ["a total beyond the exact integer range of a double", "9007199254740993", "9007199254740993"],
+    ["a long fractional total", "12.123456789012345678", "12.123456789012345678"],
+    ["a total with the precision suffix of a stored decimal", "34.000000000000000000", "34"],
+  ])("asks Prism to quote %s as a plain decimal and stores the same text", async (_label, total, expected) => {
+    const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
+
+    const prepared = await prepareCart(handlerWith(preparePayment), { total })
+
+    expect(preparePayment.mock.calls[0][0].amount).toBe(expected)
+    expect(prepared?.preparedAmount).toBe(expected)
+  })
+
+  it.each([
+    ["not a number", "abc"],
+    ["negative", -5],
+    ["infinite", Infinity],
+    ["an object holding no amount", { value: "15" }],
+    ["written with an exponent too large to expand", "1e400"],
+    ["missing", undefined],
+  ])("does not ask Prism for a quote when the cart total is %s", async (_label, total) => {
+    const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const prepared = await prepareCart(handlerWith(preparePayment), { total })
+
+    expect(prepared).toBeNull()
+    expect(preparePayment).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
+  it("prepares again when the cart currency changed but the total did not", async () => {
+    const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
+    const adapter = handlerWith(preparePayment)
+    const usdQuote = await prepareCart(adapter, { total: CART_TOTAL })
+
+    const eurQuote = await prepareCart(adapter, { total: CART_TOTAL, currency_code: "eur" }, usdQuote)
+
+    expect(preparePayment).toHaveBeenCalledTimes(2)
+    expect(preparePayment.mock.calls[1][0].currency).toBe("EUR")
+    expect(eurQuote?.preparedCurrency).toBe("eur")
+  })
+
+  it("reuses the stored quote when the same total is spelled differently", async () => {
+    const preparePayment = vi.fn().mockResolvedValue(preparedConfig)
+
+    const prepared = await prepareCart(handlerWith(preparePayment), { total: "15.000000000000000000", currency_code: "USD" }, checkoutData)
+
+    expect(preparePayment).not.toHaveBeenCalled()
+    expect(prepared).toEqual(checkoutData)
   })
 
   it("never writes the quote into buyer-writable cart metadata", async () => {
