@@ -53,6 +53,29 @@ export function paymentSessionDataFor(
   return sessionData
 }
 
+type ExistingPaymentSession = {
+  id: string
+  status?: string
+  provider_id?: string
+  data?: Record<string, unknown> | null
+}
+
+function isSettledWithSameCredential(
+  session: ExistingPaymentSession,
+  input: Pick<SetupPaymentInput, "payment_provider_id" | "payment_data">,
+): boolean {
+  const credential = input.payment_data?.eip3009_authorization
+  return (
+    session.status === "authorized" &&
+    session.provider_id === input.payment_provider_id &&
+    typeof credential === "string" &&
+    credential.length > 0 &&
+    session.data?.eip3009_authorization === credential &&
+    typeof session.data?.prism_tx_id === "string" &&
+    session.data.prism_tx_id.length > 0
+  )
+}
+
 export const setupPaymentStep = createStep(
   "setup-payment",
   async (input: SetupPaymentInput, { container }) => {
@@ -95,9 +118,12 @@ export const setupPaymentStep = createStep(
       }
     }
 
-    const staleSessionIds = (cart?.payment_collection?.payment_sessions || [])
-      .map((session: { id?: string } | null) => session?.id)
-      .filter((id: string | undefined): id is string => !!id)
+    const sessions: ExistingPaymentSession[] = (cart?.payment_collection?.payment_sessions || [])
+      .filter((session: ExistingPaymentSession | null): session is ExistingPaymentSession => !!session?.id)
+    const settled = sessions.find((session) => isSettledWithSameCredential(session, input))
+    const staleSessionIds = sessions
+      .filter((session) => session !== settled)
+      .map((session) => session.id)
 
     if (staleSessionIds.length) {
       await deletePaymentSessionsWorkflow(container).run({
@@ -105,14 +131,16 @@ export const setupPaymentStep = createStep(
       })
     }
 
-    await createPaymentSessionsWorkflow(container).run({
-      input: {
-        payment_collection_id: paymentCollectionId,
-        provider_id: input.payment_provider_id,
-        data: paymentSessionDataFor(input, cart?.metadata),
-        context: {},
-      },
-    })
+    if (!settled) {
+      await createPaymentSessionsWorkflow(container).run({
+        input: {
+          payment_collection_id: paymentCollectionId,
+          provider_id: input.payment_provider_id,
+          data: paymentSessionDataFor(input, cart?.metadata),
+          context: {},
+        },
+      })
+    }
 
     return new StepResponse(
       {
