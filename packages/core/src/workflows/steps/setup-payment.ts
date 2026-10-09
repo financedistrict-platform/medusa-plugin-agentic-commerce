@@ -5,8 +5,7 @@ import {
   createPaymentSessionsWorkflow,
   deletePaymentSessionsWorkflow,
 } from "@medusajs/medusa/core-flows"
-
-const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
+import { checkoutTotalMismatch, PRISM_CHECKOUT_DATA_KEY } from "../../lib/checkout-total-binding"
 
 type SetupPaymentInput = {
   cart_id: string
@@ -86,14 +85,17 @@ export const setupPaymentStep = createStep(
       entity: "cart",
       fields: [
         "id",
+        "total",
         "metadata",
         "payment_collection.id",
+        "payment_collection.amount",
         "payment_collection.payment_sessions.*",
       ],
       filters: { id: input.cart_id },
     })
 
     let paymentCollectionId = cart?.payment_collection?.id
+    let paymentCollectionAmount = cart?.payment_collection?.amount
 
     // Create payment collection if none exists
     if (!paymentCollectionId) {
@@ -104,11 +106,12 @@ export const setupPaymentStep = createStep(
       // Re-fetch to get the payment collection ID
       const { data: [updatedCart] } = await query.graph({
         entity: "cart",
-        fields: ["id", "payment_collection.id"],
+        fields: ["id", "payment_collection.id", "payment_collection.amount"],
         filters: { id: input.cart_id },
       })
 
       paymentCollectionId = updatedCart?.payment_collection?.id
+      paymentCollectionAmount = updatedCart?.payment_collection?.amount
 
       if (!paymentCollectionId) {
         throw new MedusaError(
@@ -116,6 +119,19 @@ export const setupPaymentStep = createStep(
           "Failed to create payment collection for cart"
         )
       }
+    }
+
+    const mismatch = checkoutTotalMismatch({
+      paymentProviderId: input.payment_provider_id,
+      cartTotal: cart?.total,
+      paymentCollectionAmount,
+      cartMetadata: cart?.metadata,
+    })
+    if (mismatch) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        `Cart ${input.cart_id} cannot be paid: ${mismatch}. Update the checkout session to get a fresh payment quote and sign it again.`
+      )
     }
 
     const sessions: ExistingPaymentSession[] = (cart?.payment_collection?.payment_sessions || [])
