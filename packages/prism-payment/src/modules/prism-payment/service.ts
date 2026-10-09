@@ -89,6 +89,13 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
     const sessionId = crypto.randomUUID()
+    return { id: sessionId, data: this.sessionDataFrom(sessionId, input) }
+  }
+
+  private sessionDataFrom(
+    sessionId: string,
+    input: Pick<InitiatePaymentInput, "amount" | "currency_code" | "data">,
+  ): Record<string, unknown> {
     const inputData = (input.data || {}) as Record<string, unknown>
 
     const data: Record<string, unknown> = {
@@ -120,11 +127,23 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       console.warn("[prism-payment] Stored Prism quote is unreadable or unsigned; authorization will be rejected")
     }
 
-    return { id: sessionId, data }
+    return data
   }
 
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
     const data = (input.data || {}) as Record<string, unknown>
+
+    if (data.prism_tx_id) {
+      const mismatch = settledPaymentMismatch(data, this.client.getApiKey())
+      if (mismatch) {
+        return {
+          data: { ...data, error: mismatch },
+          status: "error" as PaymentSessionStatus,
+        }
+      }
+      return { data, status: "authorized" as PaymentSessionStatus }
+    }
+
     const authorizationB64 = data.eip3009_authorization as string | undefined
 
     if (!authorizationB64) {
@@ -318,13 +337,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   }
 
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
-    return {
-      data: {
-        ...((input.data || {}) as Record<string, unknown>),
-        amount: input.amount,
-        currency_code: input.currency_code,
-      },
-    }
+    const inputData = (input.data || {}) as Record<string, unknown>
+    const sessionId = typeof inputData.prism_session_id === "string" ? inputData.prism_session_id : crypto.randomUUID()
+    return { data: this.sessionDataFrom(sessionId, input) }
   }
 
   async getPaymentStatus(input: GetPaymentStatusInput): Promise<GetPaymentStatusOutput> {

@@ -566,3 +566,104 @@ describe("Prism quote produced by the handler", () => {
     expect(adapter.getUcpCheckoutHandlers({ prism_checkout_data: checkoutData } as any)).toEqual({})
   })
 })
+
+describe("Prism provider settles a session only once", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+  })
+
+  const settledSession = async () => {
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+    return result.data as Record<string, unknown>
+  }
+
+  it("authorizes a session that already holds its settlement without verifying or settling again", async () => {
+    const data = await settledSession()
+    client.verifyPayment.mockClear()
+    client.settlePayment.mockClear()
+
+    const again = await provider.authorizePayment({ data } as any)
+
+    expect(again.status).toBe("authorized")
+    expect(again.data).toEqual(data)
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["the settled amount no longer matches the quote", (data: Record<string, unknown>) => ({ ...data, settled_amount: "1" }), "settled_amount_mismatch"],
+    ["the settled token was never quoted", (data: Record<string, unknown>) => ({ ...data, settled_asset: "0x4444444444444444444444444444444444444444" }), "settled_payment_not_quoted"],
+    ["the stored quote was rewritten", (data: Record<string, unknown>) => ({ ...data, payment_quote: { ...(data.payment_quote as object), preparedAmount: "1" } }), "invalid_quote_signature"],
+    ["the stored quote is gone", (data: Record<string, unknown>) => ({ ...data, payment_quote: undefined }), "missing_payment_quote"],
+    ["the order total moved", (data: Record<string, unknown>) => ({ ...data, amount: CART_TOTAL * 100 }), "quote_total_mismatch"],
+  ])("refuses to authorize a settled session when %s, and never settles again", async (_label, tamper, error) => {
+    const data = await settledSession()
+    client.verifyPayment.mockClear()
+    client.settlePayment.mockClear()
+
+    const again = await provider.authorizePayment({ data: tamper(data) } as any)
+
+    expect(again.status).toBe("error")
+    expect((again.data as Record<string, unknown>).error).toBe(error)
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("refuses a settlement reference that is not a transaction hash string", async () => {
+    const data = await settledSession()
+    client.settlePayment.mockClear()
+
+    const again = await provider.authorizePayment({ data: { ...data, prism_tx_id: { forged: true } } } as any)
+
+    expect(again.status).toBe("error")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("does not copy a settlement, a captured flag or a quote from the data of a session update", async () => {
+    const data = await sessionData(provider, credential())
+
+    const updated = await provider.updatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: {
+        ...data,
+        prism_tx_id: "0xforged",
+        transaction_reference: "0xforged",
+        transaction_network: NETWORK,
+        settled_amount: QUOTED_VALUE,
+        settled_asset: ASSET,
+        captured: true,
+        payment_quote: { forged: true },
+      },
+    } as any)
+
+    const kept = updated.data as Record<string, unknown>
+    for (const key of ["prism_tx_id", "transaction_reference", "transaction_network", "settled_amount", "settled_asset", "captured", "payment_quote"]) {
+      expect(kept).not.toHaveProperty(key)
+    }
+    expect(kept).toMatchObject({ prism_session_id: data.prism_session_id, amount: CART_TOTAL, currency_code: "usd" })
+    expect(kept.eip3009_authorization).toBe(data.eip3009_authorization)
+
+    const result = await provider.authorizePayment({ data: kept } as any)
+    expect(result.status).toBe("error")
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("keeps the signed quote of a session update that carries the checkout data again", async () => {
+    const data = await sessionData(provider, credential())
+
+    const updated = await provider.updatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { eip3009_authorization: data.eip3009_authorization, prism_checkout_data: checkoutData },
+    } as any)
+
+    expect((updated.data as Record<string, unknown>).payment_quote).toEqual(data.payment_quote)
+  })
+})
