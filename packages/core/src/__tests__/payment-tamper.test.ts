@@ -3,6 +3,7 @@ import { createRequest, createResponse, createStoreService } from "./helpers/ren
 import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { extractSignedSummary } from "../lib/validate-signed-amount"
 import { paymentSessionDataFor } from "../workflows/steps/setup-payment"
+import { settledPaymentMetadata } from "../lib/settled-payment-record"
 
 const completeRun = vi.hoisted(() => vi.fn(async () => {
   throw new Error("stop after settlement handoff")
@@ -334,6 +335,18 @@ describe("completed checkout records what was settled", () => {
       payment_settled_network: "eip155:84532",
       payment_transaction: "0xtx",
     })
+  })
+
+  it.each([
+    [1e21, "1000000000000000000000"],
+    [1e-7, "0.0000001"],
+    ["9007199254740993", "9007199254740993"],
+  ])("records the order total %s as a plain decimal", (total, expected) => {
+    expect(settledPaymentMetadata({ total, currency_code: "usd", payment_collection: { payment_sessions: [settledSession] } }, "x402").payment_amount).toBe(expected)
+  })
+
+  it("records no payment amount when the order total is not a plain amount", () => {
+    expect(settledPaymentMetadata({ total: "abc", currency_code: "usd", payment_collection: { payment_sessions: [settledSession] } }, "x402").payment_amount).toBeNull()
   })
 
   it.each([
@@ -706,6 +719,38 @@ describe("UCP completion against a cart changed after its quote", () => {
       total: QUOTED_TOTAL,
       payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
     }, "pp_prism_prism", unpriced)).rejects.toThrow(/missing_payment_quote/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a cart total that differs from the quote only beyond double precision", async () => {
+    await expect(completeSetup({
+      total: "9007199254740992",
+      payment_collection: { id: "paycol_1", amount: "9007199254740992", payment_sessions: [] },
+    }, "pp_prism_prism", { ...storedQuote, preparedAmount: "9007199254740993" })).rejects.toThrow(/quote_total_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("rejects a payment collection that differs from the cart total only beyond double precision", async () => {
+    await expect(completeSetup({
+      total: "9007199254740993",
+      payment_collection: { id: "paycol_1", amount: "9007199254740992", payment_sessions: [] },
+    }, "pp_prism_prism", { ...storedQuote, preparedAmount: "9007199254740993" })).rejects.toThrow(/payment_amount_mismatch/)
+    expectNothingPrepared()
+  })
+
+  it("prepares a very large total that the quote and payment amount write in different forms", async () => {
+    await completeSetup({
+      total: 1e21,
+      payment_collection: { id: "paycol_1", amount: "1000000000000000000000.000000000000000000", payment_sessions: [] },
+    }, "pp_prism_prism", { ...storedQuote, preparedAmount: "1000000000000000000000" })
+    expect(paymentFlows.createSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects a cart total that is not a plain amount", async () => {
+    await expect(completeSetup({
+      total: "abc",
+      payment_collection: { id: "paycol_1", amount: QUOTED_TOTAL, payment_sessions: [] },
+    })).rejects.toThrow(/missing_cart_total/)
     expectNothingPrepared()
   })
 
