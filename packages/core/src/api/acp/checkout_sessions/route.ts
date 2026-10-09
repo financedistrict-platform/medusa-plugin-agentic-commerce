@@ -7,6 +7,17 @@ import { getPublicBaseUrl } from "../../../lib/public-url"
 import { computeSessionFingerprint } from "../../../lib/session-ownership"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
+  const sessionFingerprint = computeSessionFingerprint("acp", req.headers)
+  if (!sessionFingerprint) {
+    res.status(401).json(formatAcpError({
+      type: "invalid_request",
+      code: "unauthorized",
+      message: "Missing API key in Authorization header",
+      httpStatus: 401,
+    }))
+    return
+  }
+
   try {
     const body = req.validatedBody as any
 
@@ -49,7 +60,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         protocol: "acp",
         agent_identifier: agentIdentifier,
         protocol_version: protocolVersion,
-        session_fingerprint: computeSessionFingerprint(req),
+        session_fingerprint: sessionFingerprint,
       } as any,
     })
 
