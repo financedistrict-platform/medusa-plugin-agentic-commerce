@@ -83,8 +83,8 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
 
   static validateOptions(options: Record<string, unknown>) {
     if (!options.api_url) throw new Error("Prism payment provider requires api_url")
-    if (!options.api_key) {
-      console.warn("[prism-payment] No PRISM_API_KEY configured — Prism payment provider will run in passthrough mode")
+    if (!options.api_key && !process.env.PRISM_API_KEY) {
+      throw new Error("Prism payment provider requires api_key or the PRISM_API_KEY environment variable; without it every Prism payment is rejected")
     }
   }
 
