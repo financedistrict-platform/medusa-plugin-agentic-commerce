@@ -1,5 +1,17 @@
 # @financedistrict/medusa-plugin-prism-payment
 
+## 1.1.4
+
+### Patch Changes
+
+- [#56](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/56) [`9fd1a84`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/9fd1a84c5f580f88cff946a07f108a53089ef083) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - The ACP entry is composed from `/api/v2/merchant/acp/handlers` and `/api/v2/merchant/payment-requirements`. One Prism call serves UCP and ACP. A failed re-prepare clears the stored quote. `PrismClient.prepareAcpPayment` is removed.
+
+- [#56](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/56) [`9fd1a84`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/9fd1a84c5f580f88cff946a07f108a53089ef083) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Prepare UCP checkouts with Prism's protocol-free `POST /api/v2/merchant/payment-requirements`, which returns raw x402. The plugin builds the `xyz.fd.prism_payment` checkout entry from the handler declaration it serves in discovery for the same UCP version, so `id` and `version` always match `/.well-known/ucp`. If no declaration is available the UCP entry is omitted. ACP is unchanged. Needs Prism with the new route.
+
+- [#56](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/56) [`9fd1a84`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/9fd1a84c5f580f88cff946a07f108a53089ef083) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Call the public `GET /ucp/<ucp-version>/handlers` for handler discovery instead of `/api/v2/merchant/ucp/<ucp-version>/handlers`. Needs Prism with that route.
+
+- [#56](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/56) [`9fd1a84`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/9fd1a84c5f580f88cff946a07f108a53089ef083) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Call Prism with the UCP version in the path (`/api/v2/merchant/ucp/<ucp-version>/handlers`). ACP, verify and settle no longer send a UCP version. Needs Prism with versioned routes.
+
 ## 1.1.3
 
 ### Patch Changes

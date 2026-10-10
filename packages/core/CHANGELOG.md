@@ -1,5 +1,13 @@
 # @financedistrict/medusa-plugin-agentic-commerce
 
+## 1.1.3
+
+### Patch Changes
+
+- [#56](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/56) [`9fd1a84`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/9fd1a84c5f580f88cff946a07f108a53089ef083) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Accept agent currency codes in any case. `context.currency` on UCP checkout and cart create, and `currency` on ACP checkout create, are lowercased before they reach the Medusa cart, so `"USD"` no longer fails with a 500. Responses still return upper-case ISO 4217 codes.
+
+- [#56](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/56) [`9fd1a84`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/9fd1a84c5f580f88cff946a07f108a53089ef083) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - UCP routes now accept the store key in the `X-API-Key` header as well as `Authorization: Bearer`. An invalid `X-API-Key` returns 401, and idempotency scope and session ownership treat both headers as the same key.
+
 ## 1.1.2
 
 ### Patch Changes
