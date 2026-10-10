@@ -1,7 +1,7 @@
 import {
-  extractSignedSummary,
   readStoredPrismAccepts,
   validateSignedAgainstStored,
+  type SignedPaymentSummary,
 } from "./validate-signed-amount"
 
 export const PRISM_UCP_HANDLER_ID = "xyz.fd.prism_payment"
@@ -54,13 +54,11 @@ export function checkPrismInstrument(instrument: InstrumentInput): GuardFailure 
 }
 
 export function checkQuoteBinding(
-  cartMetadata: unknown,
+  storedQuote: unknown,
   handlerId: string | undefined,
-  credential: unknown,
+  signedSummary: SignedPaymentSummary | null,
+  protocol: "ucp" | "acp" = "ucp",
 ): GuardFailure | null {
-  if (!hasPrismQuote(cartMetadata)) return null
-
-  const signedSummary = extractSignedSummary(credential)
   if (!signedSummary) {
     return {
       status: 422,
@@ -71,17 +69,11 @@ export function checkQuoteBinding(
 
   const validation = validateSignedAgainstStored(
     signedSummary,
-    readStoredPrismAccepts(cartMetadata, normalizePrismHandlerId(handlerId), "ucp"),
+    readStoredPrismAccepts(storedQuote, protocol === "ucp" ? normalizePrismHandlerId(handlerId) : handlerId, protocol),
   )
   return validation.ok
     ? null
     : { status: 422, code: validation.code, content: validation.message }
-}
-
-function hasPrismQuote(cartMetadata: unknown): boolean {
-  if (typeof cartMetadata !== "object" || cartMetadata === null) return false
-  const data = (cartMetadata as Record<string, unknown>).prism_checkout_data
-  return typeof data === "object" && data !== null
 }
 
 function invalidInstrument(content: string): GuardFailure {

@@ -68,22 +68,22 @@ describe("version registry defaults", () => {
 
 describe("AgenticCommerceService configuration", () => {
   it("keeps the ucp_version option and builds the registry from it", () => {
-    const service = new AgenticCommerceService({}, { ucp_version: "2026-04-08" })
+    const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08" })
     expect(service.getUcpVersion()).toBe("2026-04-08")
     expect(service.getUcpRegistry().enabled()).toEqual(["2026-04-08", "2026-08-25", "2026-01-23"])
   })
 
   it("serves the latest version when ucp_version is omitted", () => {
-    const service = new AgenticCommerceService({}, {})
+    const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism" })
     expect(service.getUcpVersion()).toBe(LATEST_UCP_VERSION)
     expect(service.getUcpRegistry().enabled()).toEqual([LATEST_UCP_VERSION, ...DEFAULT_SUPPORTED_UCP_VERSIONS])
   })
 
   it("fails at boot on an unknown version", () => {
-    expect(() => new AgenticCommerceService({}, { ucp_version: "2025-12-31" })).toThrow("Unknown UCP version: 2025-12-31")
+    expect(() => new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version: "2025-12-31" })).toThrow("Unknown UCP version: 2025-12-31")
   })
 
   it("fails at boot on an unknown negotiation mode", () => {
-    expect(() => new AgenticCommerceService({}, { ucp_version_negotiation: "loose" as any })).toThrow("Unknown UCP version negotiation: loose")
+    expect(() => new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version_negotiation: "loose" as any })).toThrow("Unknown UCP version negotiation: loose")
   })
 })

@@ -13,7 +13,7 @@
 
 ### Patch Changes
 
-- [#26](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/26) [`88c1702`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/88c170287bcc1f41773e0da855dbaf082e326b67) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Send `User-Agent: fd-medusa-prism/<ucp-version>` on every Prism call so Prism picks the handler contract for that UCP version, and stop sending the `ucp_version` query.
+- [#26](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/26) [`88c1702`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/88c170287bcc1f41773e0da855dbaf082e326b67) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Every Prism call carries the UCP version so Prism picks the handler contract for that UCP version, and the `ucp_version` query is no longer sent.
 
   - UCP discovery and UCP checkout use the request's UCP version; ACP routes and ACP discovery use the store's current `ucp_version`
   - `CheckoutPrepareInput` has a new `ucpVersion` field and `getAcpDiscoveryHandlers` receives the UCP version; custom payment handler adapters can ignore both
@@ -36,7 +36,7 @@
   - New options `ucp_supported_versions` and `ucp_version_negotiation` (`lenient` default, `strict`); unknown values fail at boot
   - Checkout sessions created for a declared version stay on it
   - Original-era instruments (`tokenized`, `default`, missing `type`, `handler_id` `x402` or missing) complete again; quote binding still applies
-  - Prism discovery is fetched per UCP version, accepts the legacy Prism entry, and sends `User-Agent: fd-medusa-prism/<version>`
+  - Prism discovery is fetched per UCP version and accepts the legacy Prism entry
 
 ## 1.0.0
 

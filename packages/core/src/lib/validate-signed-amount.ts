@@ -17,6 +17,14 @@ export type SignedPaymentSummary = {
   value: string
   /** EIP-3009 signed recipient (`authorization.to`) — case-insensitive */
   to: string
+  /** EIP-3009 signed payer (`authorization.from`) — case-insensitive */
+  payer: string
+  /** EIP-3009 signed nonce (`authorization.nonce`) — case-insensitive */
+  nonce: string
+  /** Amount named by the declared requirements (`accepted.amount`) */
+  declaredAmount: string
+  /** Recipient named by the declared requirements (`accepted.payTo`) — case-insensitive */
+  declaredPayTo: string
 }
 
 export type StoredAcceptEntry = {
@@ -36,82 +44,61 @@ export type ValidationErrorCode =
   | "no_matching_accepts_entry"
   | "amount_mismatch"
   | "wrong_recipient"
+  | "declared_requirements_mismatch"
 
-// =====================================================
-// Extraction — handles every credential shape we've seen on the wire
-// =====================================================
+export function extractSignedSummary(authorizationB64: string): SignedPaymentSummary | null {
+  const decoded = decodeBase64Json(authorizationB64)
+  if (!isRecord(decoded) || !isRecord(decoded.paymentPayload)) return null
 
-/**
- * Extract (network, asset, value, to) from a UCP/ACP credential.
- * Handles base64-string, legacy single-field, wrapper, and flat shapes.
- * Returns null if the input is unrecognised or missing required fields.
- */
-export function extractSignedSummary(input: unknown): SignedPaymentSummary | null {
-  if (typeof input === "string") {
-    return extractFromBase64(input)
-  }
-  if (typeof input !== "object" || input === null) {
-    return null
-  }
-  const obj = input as Record<string, unknown>
-
-  // Legacy single-field shape: { authorization: "<b64>" }
-  if (
-    typeof obj.authorization === "string" &&
-    obj.authorization.length > 0 &&
-    !obj.paymentPayload
-  ) {
-    return extractFromBase64(obj.authorization)
-  }
-
-  // Wrapper { paymentPayload, ... } or flat (obj IS the paymentPayload).
-  const pp =
-    obj.paymentPayload && typeof obj.paymentPayload === "object"
-      ? (obj.paymentPayload as Record<string, unknown>)
-      : obj
-
-  const accepted = pp.accepted as Record<string, unknown> | undefined
-  const payload = pp.payload as Record<string, unknown> | undefined
-  const authz = payload?.authorization as Record<string, unknown> | undefined
-
+  const { accepted, payload } = decoded.paymentPayload
+  const authz = isRecord(payload) ? payload.authorization : undefined
   const network = readNonEmptyString(accepted, "network")
   const asset = readNonEmptyString(accepted, "asset")
   const value = readNonEmptyString(authz, "value")
   const to = readNonEmptyString(authz, "to")
+  const payer = readNonEmptyString(authz, "from")
+  const nonce = readNonEmptyString(authz, "nonce")
+  const declaredAmount = readNonEmptyString(accepted, "amount")
+  const declaredPayTo = readNonEmptyString(accepted, "payTo")
 
-  if (!network || !asset || !value || !to) return null
-  return { network, asset, value, to }
+  if (!network || !asset || !value || !to || !payer || !nonce || !declaredAmount || !declaredPayTo || !ATOMIC_UNITS.test(value)) return null
+  if (!EVM_ADDRESS.test(payer) || !BYTES32_HEX.test(nonce)) return null
+  return { network, asset, value, to, payer, nonce, declaredAmount, declaredPayTo }
 }
 
-function extractFromBase64(b64: string): SignedPaymentSummary | null {
+const ATOMIC_UNITS = /^[0-9]+$/
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const BYTES32_HEX = /^0x[0-9a-fA-F]{64}$/
+
+function decodeBase64Json(b64: string): unknown {
   try {
-    const decoded = Buffer.from(b64, "base64").toString("utf-8")
-    const parsed = JSON.parse(decoded)
-    return extractSignedSummary(parsed)
+    return JSON.parse(Buffer.from(b64, "base64").toString("utf-8"))
   } catch {
     return null
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 // =====================================================
-// Cart-metadata reader
+// Stored-quote reader
 // =====================================================
 
 /**
  * Read the cart's stored Prism accepts[] for the given handler and
  * protocol. Returns null if the cart wasn't prepared for Prism.
- * The `prism_checkout_data` metadata key is set by the prism-payment
- * handler at prepare time.
+ * The stored quote is what the prism-payment handler returned at
+ * prepare time, kept in the plugin's agent session.
  */
 export function readStoredPrismAccepts(
-  cartMetadata: unknown,
+  storedQuote: unknown,
   handlerId: string | undefined,
   protocol: "ucp" | "acp",
 ): StoredAcceptEntry[] | null {
-  if (typeof cartMetadata !== "object" || cartMetadata === null) return null
-  const data = (cartMetadata as Record<string, unknown>).prism_checkout_data
-  if (typeof data !== "object" || data === null) return null
-  const d = data as Record<string, unknown>
+  if (typeof storedQuote !== "object" || storedQuote === null) return null
+  const d = storedQuote as Record<string, unknown>
 
   if (protocol === "ucp") {
     if (!handlerId) return null
@@ -186,6 +173,14 @@ export function validateSignedAgainstStored(
     }
   }
 
+  if (!sameAtomicValue(match.amount, summary.declaredAmount) || !sameAddress(match.payTo, summary.declaredPayTo)) {
+    return {
+      ok: false,
+      code: "declared_requirements_mismatch",
+      message: `The payment requirements declared in the credential do not match the cart's payment quote.`,
+    }
+  }
+
   if (!sameAtomicValue(match.amount, summary.value)) {
     return {
       ok: false,
@@ -221,11 +216,8 @@ function sameAtomicValue(a: string, b: string): boolean {
   }
 }
 
-function readNonEmptyString(
-  obj: Record<string, unknown> | undefined,
-  key: string,
-): string | undefined {
-  if (!obj) return undefined
+function readNonEmptyString(obj: unknown, key: string): string | undefined {
+  if (!isRecord(obj)) return undefined
   const v = obj[key]
   return typeof v === "string" && v.length > 0 ? v : undefined
 }

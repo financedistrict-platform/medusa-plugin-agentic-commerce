@@ -11,6 +11,7 @@ import {
   addShippingMethodToCartWorkflow,
 } from "@medusajs/medusa/core-flows"
 import { useQueryGraphStep } from "@medusajs/medusa/core-flows"
+import { openAgentSessionStep } from "./steps/open-agent-session"
 
 type CreateCheckoutSessionInput = {
   items: { variant_id: string; quantity: number }[]
@@ -25,7 +26,7 @@ type CreateCheckoutSessionInput = {
   agent_identifier?: string
   protocol_version?: string
   ucp_version?: string
-  session_fingerprint?: string
+  session_fingerprint: string
 }
 
 const createCheckoutSessionWorkflow = createWorkflow(
@@ -66,8 +67,6 @@ const createCheckoutSessionWorkflow = createWorkflow(
               .replace(/[\x00-\x1f\x7f]/g, "")
               .slice(0, 256),
             checkout_session_created_at: new Date().toISOString(),
-            session_fingerprint: input.session_fingerprint || null,
-            ...(input.ucp_version ? { ucp_version: input.ucp_version } : {}),
             ...(input.webhook_url ? { agent_webhook_url: input.webhook_url } : {}),
           },
           ...(address ? { shipping_address: address } : {}),
@@ -82,6 +81,14 @@ const createCheckoutSessionWorkflow = createWorkflow(
 
     // Step 3: If shipping address was provided, auto-select cheapest shipping
     const cartId = transform(cart, (cart) => cart.id)
+
+    openAgentSessionStep(
+      transform({ cartId, input }, ({ cartId, input }) => ({
+        cart_id: cartId,
+        fingerprint: input.session_fingerprint,
+        ucp_version: input.ucp_version,
+      }))
+    )
 
     const hasAddress = transform(input, (input) => !!(input.fulfillment_address || input.shipping_address))
 

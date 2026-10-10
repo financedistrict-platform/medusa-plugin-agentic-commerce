@@ -45,6 +45,11 @@ export default defineConfig({
     },
   ],
   modules: [
+    // Register the agent session module (owns quotes, ownership and cancellation state)
+    {
+      key: "agenticCommerceSession",
+      resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agent-session",
+    },
     // Register the core service module with your configuration
     {
       key: "agenticCommerce",
@@ -55,6 +60,7 @@ export default defineConfig({
         storefront_url: process.env.STOREFRONT_URL || "https://your-store.com",
         store_name: "Your Store Name",
         store_description: "What your store sells",
+        payment_provider_id: "pp_prism_prism",
         // Reference payment handler adapter module keys (see Payment Handlers)
         payment_handler_adapters: ["prismPaymentHandler"],
       },
@@ -63,11 +69,16 @@ export default defineConfig({
 })
 ```
 
+Run `npx medusa db:migrate` after installing or upgrading: the agent session module creates the `agent_session` table and the same module creates the `payment_authorization` table of the payment ledger. Checkout sessions and carts opened before this version have no row or no session secret and must be recreated by the agent.
+
+A signed payment authorization (token, payer and nonce) can be used on one cart only. The payment ledger records it before the cart is completed, so the same authorization is refused on a second cart (ACP answers `409 payment_authorization_used`) while the cart that holds it can still retry. Checkout completion fails when the agent session module is not registered.
+
 ### 3. Set Environment Variables
 
 ```bash
 # Required
 AGENTIC_COMMERCE_API_KEY=your-secret-api-key
+AGENTIC_PAYMENT_PROVIDER=pp_prism_prism
 
 # Optional
 AGENTIC_COMMERCE_SIGNATURE_KEY=your-hmac-secret
@@ -119,7 +130,9 @@ UCP is designed for **agent-to-merchant** interactions. It uses a shopping-cart 
 | `/ucp/checkout-sessions/:id/cancel` | POST | Cancel checkout session |
 | `/ucp/orders/:id` | GET | Retrieve order details |
 
-**Required headers:** `UCP-Agent`, `Request-Id`
+**Required headers:** `UCP-Agent`, `Request-Id`, and `UCP-Session-Secret` on every call that follows the create call (see below)
+
+**Session secret:** creating a cart or checkout session returns a random `UCP-Session-Secret` response header, once. Send it as the `UCP-Session-Secret` request header on every later call for that cart or session, and on `GET /ucp/orders/:id` for the order it placed. The store keeps only a hash of it. The `UCP-Agent` header and a Bearer token do not identify the buyer. A request without the secret, or with a wrong one, gets `403 session_ownership_mismatch` on carts and checkout sessions and `404 not_found` on orders. If a create response is lost, create a new session: a replayed create (same `Idempotency-Key`) does not return the secret again.
 
 **Versions:** the store serves `ucp_version` (default: the latest version, currently `2026-08-25`) plus every version in `ucp_supported_versions` (default: every other known version, currently `2026-04-08`, `2026-01-23`). The version for a request comes from the `ucp.version` of the agent profile named in `UCP-Agent: ...; profile="https://..."`. The profile is fetched over HTTPS only, from public addresses only, with a 3 s timeout, a 128 KiB cap and no redirects, and cached for 10 minutes.
 
@@ -155,6 +168,8 @@ ACP is designed for **platform-to-merchant** interactions. It uses a session-bas
 | `/acp/product-feed` | GET | Retrieve product feed |
 
 **Required headers:** `Authorization: Bearer <api_key>`, `API-Version`
+
+A checkout session belongs to the API key that created it. `GET /acp/orders/:id` answers `404 not_found` unless the order was placed by a session that API key opened.
 
 ## Payment Handlers
 
@@ -205,18 +220,19 @@ export default class MyPaymentAdapter implements PaymentHandlerAdapter {
     }]
   }
 
-  // Checkout preparation — called when a checkout session is created
+  // Checkout preparation — called when a checkout session is created or updated.
+  // input.stored is what you returned last time; the plugin persists the result.
   async prepareCheckoutPayment(input: CheckoutPrepareInput) {
     // Call your payment gateway, return config for the agent
     return { id: "my-handler", version: "1.0.0", config: { /* ... */ } }
   }
 
   // Response formatting — include payment config in checkout responses
-  getUcpCheckoutHandlers(cartMetadata?: Record<string, unknown>) {
+  getUcpCheckoutHandlers(stored?: unknown) {
     return { /* ... */ }
   }
 
-  getAcpCheckoutHandlers(cartMetadata?: Record<string, unknown>) {
+  getAcpCheckoutHandlers(stored?: unknown) {
     return [/* ... */]
   }
 }
@@ -237,6 +253,7 @@ modules: [
     resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agentic-commerce",
     options: {
       payment_handler_adapters: ["myPaymentHandler"],
+      payment_provider_id: "pp_my_provider",
       // ...
     },
   },
@@ -252,6 +269,9 @@ medusa-config.ts
   |     Routes, workflows, subscribers, jobs auto-discovered
   |
   +-- modules:
+        +-- agenticCommerceSession (agent_session table)
+        |     Fingerprint, UCP version pin, cancellation, payment quotes
+        |
         +-- agenticCommerce (core service)
         |     Config, auth, formatting, payment registry
         |
@@ -301,14 +321,17 @@ import {
 | `storefront_url` | `string` | `"http://localhost:8000"` | Public URL of your storefront |
 | `store_name` | `string` | `"My Store"` | Store name in protocol responses |
 | `store_description` | `string` | `""` | Store description for discovery |
-| `payment_provider_id` | `string` | `"pp_system_default"` | Medusa payment provider ID |
+| `payment_provider_id` | `string` | required | Medusa payment provider that settles agent payments, for example `"pp_prism_prism"` |
+| `allow_system_payment_provider` | `boolean` | `false` | Allows `pp_system_default` for local testing. It approves every payment, so it also needs `NODE_ENV` `development` or `test` and no `payment_handler_adapters` |
 | `payment_handler_adapters` | `string[]` | `[]` | Module keys of payment handler adapters |
 | `ucp_version` | `string` | latest (`"2026-08-25"`) | Current UCP version, served when the agent declares none. Set `"2026-04-08"` to keep the root profile of 0.x releases |
 | `ucp_supported_versions` | `string[]` | every known version except `ucp_version` | Further UCP versions served on request; the current version is removed from this list |
 | `ucp_version_negotiation` | `"lenient" \| "strict"` | `"lenient"` | How an unusable agent profile is handled (see UCP above) |
 | `acp_version` | `string` | `"2026-01-30"` | ACP protocol version to advertise |
 
-An unknown version or negotiation value stops the store at boot.
+An unknown version or negotiation value stops the store at boot. So does a missing `payment_provider_id`, or the system provider outside the local-testing case above.
+
+Point `payment_provider_id` only at a provider that verifies the agent's credential before it approves a payment. In production, also remove `pp_system_default` from every region: Medusa's own store routes can still complete a cart with any provider enabled on its region.
 
 ### Environment Variables
 

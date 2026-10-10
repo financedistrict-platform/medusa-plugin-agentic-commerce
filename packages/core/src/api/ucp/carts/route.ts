@@ -1,8 +1,8 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-session"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../lib/cart-fields"
+import { fetchSessionCart } from "../../../lib/agent-session"
 import { getPublicBaseUrl } from "../../../lib/public-url"
-import { computeSessionFingerprint } from "../../../lib/session-ownership"
+import { issueUcpSessionSecret, UCP_SESSION_SECRET_HEADER } from "../../../lib/session-ownership"
 import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
@@ -20,6 +20,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const currencyCode = body.context?.currency
 
     const agentIdentifier = req.headers["ucp-agent"] as string | undefined
+    const sessionSecret = issueUcpSessionSecret()
 
     const { result: cart } = await createCheckoutSessionWorkflow(req.scope).run({
       input: {
@@ -31,22 +32,18 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         agent_identifier: agentIdentifier,
         protocol_version: ucpVersionFor(req),
         ucp_version: (req as UcpRequestLike).ucp?.outcome === "matched" ? ucpVersionFor(req) : undefined,
-        session_fingerprint: computeSessionFingerprint(req),
+        session_fingerprint: sessionSecret.fingerprint,
       },
     })
 
     // Fetch full cart for formatting
-    const query = req.scope.resolve("query") as any
-    const { data: [fullCart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id: cart.id },
-    })
+    const fullCart = await fetchSessionCart(req.scope, cart.id)
 
     const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
     const baseUrl = `${getPublicBaseUrl(req)}/ucp/carts`
     const formatted = agenticCommerceService.formatUcpCart(fullCart, baseUrl, ucpVersionFor(req))
 
+    res.set(UCP_SESSION_SECRET_HEADER, sessionSecret.secret)
     res.status(201).json(formatted)
   } catch (error: any) {
     res.status(500).json(ucpErrorFor(req, {

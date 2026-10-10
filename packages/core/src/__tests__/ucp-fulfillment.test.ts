@@ -23,6 +23,7 @@ const ctx = {
 
 const addressCart = {
   id: "cart_1",
+  agent_session: null,
   currency_code: "usd",
   items: [
     { id: "li_1", quantity: 2, unit_price: 10 },
@@ -203,7 +204,7 @@ describe("formatUcpCheckoutSession — fulfillment integration", () => {
   it("omits the fulfillment field when cart has no line items", () => {
     const session = formatUcpCheckoutSession(
       ctx,
-      { id: "c_empty", items: [] },
+      { id: "c_empty", items: [], agent_session: null },
       "https://api.test/ucp/checkout-sessions",
       shippingOptions
     ) as any

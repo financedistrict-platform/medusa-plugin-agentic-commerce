@@ -1,14 +1,13 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { formatAcpError, httpStatusToAcpType } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
-import {
-  extractSignedSummary,
-  readStoredPrismAccepts,
-  validateSignedAgainstStored,
-} from "../../../../../lib/validate-signed-amount"
+import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
+import { checkQuoteBinding, isPrismProvider, PRISM_UCP_HANDLER_ID } from "../../../../../lib/ucp-complete-guard"
+import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
+import { recordSettledPayment } from "../../../../../lib/settled-payment-record"
+import { isAuthorizationUsed, PAYMENT_AUTHORIZATION_USED } from "../../../../../lib/payment-ledger"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -35,34 +34,22 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     return
   }
 
-  // Validate the agent's signed EIP-3009 payload against the cart's
-  // stored Prism quote before forwarding to settlement. The ACP
-  // credential is base64-encoded; extractSignedSummary decodes it.
-  // See lib/validate-signed-amount.ts for details.
-  const signedSummary = extractSignedSummary(eip3009Authorization)
-  if (signedSummary) {
-    const query = req.scope.resolve("query") as any
-    const { data: [cartForValidation] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata"],
-      filters: { id },
-    })
-    const storedAccepts = readStoredPrismAccepts(
-      cartForValidation?.metadata,
+  if (isPrismProvider(paymentProviderId)) {
+    const session = await agentSessions(req.scope).find(id)
+    const bindingFailure = checkQuoteBinding(
+      handlerDataOf(session)[PRISM_UCP_HANDLER_ID],
       paymentHandlerId,
+      extractSignedSummary(eip3009Authorization),
       "acp",
     )
-    if (storedAccepts) {
-      const validation = validateSignedAgainstStored(signedSummary, storedAccepts)
-      if (!validation.ok) {
-        res.status(422).json(formatAcpError({
-          type: "invalid_request",
-          code: validation.code,
-          message: validation.message,
-          httpStatus: 422,
-        }))
-        return
-      }
+    if (bindingFailure) {
+      res.status(bindingFailure.status).json(formatAcpError({
+        type: "invalid_request",
+        code: bindingFailure.code,
+        message: bindingFailure.content,
+        httpStatus: bindingFailure.status,
+      }))
+      return
     }
   }
 
@@ -82,32 +69,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     })
 
-    // Enrich cart metadata with payment details and completion timestamp
-    const query = req.scope.resolve("query") as any
-    const { data: [cartForMeta] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata", "total", "currency_code"],
-      filters: { id },
-    })
-    if (cartForMeta) {
-      const cartModuleService = req.scope.resolve("cart") as any
-      await cartModuleService.updateCarts(id, {
-        metadata: {
-          ...cartForMeta.metadata,
-          payment_method: eip3009Authorization ? "x402" : "other",
-          payment_amount: cartForMeta.total != null ? String(cartForMeta.total / 100) : null,
-          payment_currency: cartForMeta.currency_code || null,
-          checkout_session_completed_at: new Date().toISOString(),
-        },
-      })
-    }
-
-    // Fetch completed cart for formatting (includes the cart→order link)
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const completedCart = await fetchSessionCart(req.scope, id)
+    const cart = completedCart
+      ? await recordSettledPayment(req.scope, id, completedCart, eip3009Authorization ? "x402" : "other")
+      : completedCart
 
     // Resolve order id: prefer the workflow result, fall back to the cart link.
     const orderId: string | null =
@@ -143,7 +108,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     const statusCode = error.type === "not_found" ? 404
-      : error.type === "duplicate_error" ? 409
+      : error.type === "duplicate_error" || isAuthorizationUsed(error) ? 409
       : error.type === "not_allowed" ? 410
       : error.type === "invalid_data" ? 400
       : 500
@@ -151,6 +116,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     res.status(statusCode).json(formatAcpError({
       type: httpStatusToAcpType(statusCode),
       code: error.type === "duplicate_error" ? "already_completed"
+        : isAuthorizationUsed(error) ? PAYMENT_AUTHORIZATION_USED
         : error.type === "not_allowed" ? "session_canceled"
         : error.type === "invalid_data" ? "invalid_request"
         : "checkout_failed",

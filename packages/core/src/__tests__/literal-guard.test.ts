@@ -8,7 +8,6 @@ const SKIPPED_DIRS = new Set(["__tests__", "__fixtures__"])
 const ALLOWED = [
   "packages/core/src/lib/ucp-wire/",
   "packages/core/src/lib/ucp-version-registry.ts",
-  "packages/prism-payment/src/lib/settlement-ucp-version.ts",
 ]
 const VERSION_LITERAL = /2026-01-23|2026-04-08|2026-08-25|ucp\.dev\/\d{4}-\d{2}-\d{2}/
 

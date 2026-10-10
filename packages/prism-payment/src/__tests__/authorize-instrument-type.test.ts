@@ -1,30 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
 import { isX402Instrument } from "../modules/prism-payment/types"
+import { credential as quotedCredential, encode, quotedSession, settledPayment } from "./helpers/quoted-payment"
 
-const credential = {
-  type: "x402",
-  x402Version: 2,
-  paymentPayload: {
-    x402Version: 2,
-    scheme: "exact",
-    network: "base",
-    payload: {
-      signature: "0xsig",
-      authorization: {
-        from: "0xAgent",
-        to: "0xMerchant",
-        value: "1500000",
-        validAfter: "0",
-        validBefore: String(Math.floor(Date.now() / 1000) + 3600),
-        nonce: "0xnonce",
-      },
-    },
-  },
-  paymentRequirements: { scheme: "exact" },
-}
+const credential = { type: "x402", ...quotedCredential() }
 
-const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64")
 
 describe("isX402Instrument", () => {
   it("accepts x402 and the original-era instrument types with an x402 or untyped credential", () => {
@@ -52,13 +32,13 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
       api_key: "key",
       verify_before_settle: false,
     } as any)
-    settle = vi.fn().mockResolvedValue({ success: true, transaction: "0xtx", network: "base" })
+    settle = vi.fn().mockResolvedValue({ success: true, transaction: "0xtx", network: settledPayment.network, settled: settledPayment })
     ;(provider as any).settleWithPrism = settle
   })
 
   it("settles an x402 instrument", async () => {
     const result = await provider.authorizePayment({
-      data: { eip3009_authorization: encode(credential), instrument_type: "x402", ucp_version: "2026-01-23" },
+      data: { eip3009_authorization: encode(credential), instrument_type: "x402", ucp_version: "2026-01-23", ...quotedSession() },
     } as any)
     expect(result.status).toBe("authorized")
     expect(settle).toHaveBeenCalledTimes(1)

@@ -1,14 +1,21 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
-import { CHECKOUT_SESSION_CART_FIELDS } from "../../../../../lib/cart-fields"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
+import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
+import { recordSettledPayment, settledSessionData } from "../../../../../lib/settled-payment-record"
+import {
+  isAuthorizationUsed,
+  PAYMENT_AUTHORIZATION_USED,
+  PAYMENT_AUTHORIZATION_USED_MESSAGE,
+} from "../../../../../lib/payment-ledger"
 import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
 import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
   checkPrismInstrument,
   checkQuoteBinding,
+  PRISM_UCP_HANDLER_ID,
   formatZodIssuePath,
   isPrismProvider,
   type GuardFailure,
@@ -41,8 +48,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const agenticCommerceService = req.scope.resolve("agenticCommerce") as any
   const paymentProviderId = agenticCommerceService.getPaymentProviderId()
 
-  const extracted = extractUcpPayment(body)
-  if (!extracted) {
+  const extraction = extractUcpPayment(body)
+  if (!extraction.ok && extraction.code === "conflicting_credential") {
+    reject({
+      status: 422,
+      code: "invalid_credential",
+      content: "The payment credential must carry either authorization or paymentPayload, not both.",
+    })
+    return
+  }
+  if (!extraction.ok) {
     res.status(400).json(ucpErrorFor(req, {
       code: "missing_payment",
       content: "Payment is required to complete checkout. Provide payment.instruments with a valid credential.",
@@ -50,7 +65,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     return
   }
 
-  const { eip3009Authorization, x402Version, handlerId, instrumentType } = extracted
+  const { eip3009Authorization, signedSummary, x402Version, handlerId, instrumentType } = extraction.payment
   const instrument = body.payment!.instruments[0]
 
   if (isPrismProvider(paymentProviderId)) {
@@ -59,18 +74,13 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       reject(instrumentFailure)
       return
     }
-  }
 
-  const query = req.scope.resolve("query") as any
-  const { data: [cartForValidation] } = await query.graph({
-    entity: "cart",
-    fields: ["id", "metadata"],
-    filters: { id },
-  })
-  const bindingFailure = checkQuoteBinding(cartForValidation?.metadata, handlerId, instrument.credential)
-  if (bindingFailure) {
-    reject(bindingFailure)
-    return
+    const session = await agentSessions(req.scope).find(id)
+    const bindingFailure = checkQuoteBinding(handlerDataOf(session)[PRISM_UCP_HANDLER_ID], handlerId, signedSummary)
+    if (bindingFailure) {
+      reject(bindingFailure)
+      return
+    }
   }
 
   try {
@@ -88,31 +98,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     })
 
-    // Enrich cart metadata with payment details and completion timestamp
-    const { data: [cartForMeta] } = await query.graph({
-      entity: "cart",
-      fields: ["id", "metadata", "total", "currency_code"],
-      filters: { id },
-    })
-    if (cartForMeta) {
-      const cartModuleService = req.scope.resolve("cart") as any
-      await cartModuleService.updateCarts(id, {
-        metadata: {
-          ...cartForMeta.metadata,
-          payment_method: eip3009Authorization ? "x402" : "other",
-          payment_amount: cartForMeta.total != null ? String(cartForMeta.total / 100) : null,
-          payment_currency: cartForMeta.currency_code || null,
-          checkout_session_completed_at: new Date().toISOString(),
-        },
-      })
-    }
-
-    // Fetch completed cart for formatting (includes the cart→order link)
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      fields: CHECKOUT_SESSION_CART_FIELDS,
-      filters: { id },
-    })
+    const completedCart = await fetchSessionCart(req.scope, id)
+    const cart = completedCart
+      ? await recordSettledPayment(req.scope, id, completedCart, eip3009Authorization ? "x402" : "other")
+      : completedCart
 
     // Resolve the actual order id from whichever source is available.
     // The workflow result is authoritative for a fresh completion, but the cart's
@@ -138,11 +127,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     // transaction_network) that any blockchain-settling payment provider can
     // populate. Falls back to the Prism-specific keys for older provider
     // versions.
-    const paymentSessions = (cart as any)?.payment_collection?.payment_sessions || []
-    const activeSession = paymentSessions.find((s: any) =>
-      s.status === "authorized" || s.status === "captured"
-    ) || paymentSessions[0]
-    const sessionData = activeSession?.data || {}
+    const sessionData = settledSessionData(cart as any)
     const txReference: string | null =
       sessionData.transaction_reference || sessionData.prism_tx_id || null
     const txStatus: string | null =
@@ -187,6 +172,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       })
     } catch {
       // Best effort cleanup
+    }
+
+    if (isAuthorizationUsed(error)) {
+      res.status(409).json(ucpErrorFor(req, {
+        code: PAYMENT_AUTHORIZATION_USED,
+        content: PAYMENT_AUTHORIZATION_USED_MESSAGE,
+        severity: "unrecoverable",
+      }))
+      return
     }
 
     res.status(422).json(ucpErrorFor(req, {

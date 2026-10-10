@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { extractUcpPayment } from "../lib/extract-ucp-payment"
 
+const MISSING = { ok: false, code: "missing_payment" }
+
 describe("extractUcpPayment", () => {
   // =========================================================
   // UCP spec format: payment.instruments[]
@@ -24,10 +26,14 @@ describe("extractUcpPayment", () => {
       })
 
       expect(result).toEqual({
-        eip3009Authorization: "base64-encoded-auth-data",
-        x402Version: 2,
-        handlerId: "xyz.fd.prism_payment",
-        instrumentType: "x402",
+        ok: true,
+        payment: {
+          eip3009Authorization: "base64-encoded-auth-data",
+          signedSummary: null,
+          x402Version: 2,
+          handlerId: "xyz.fd.prism_payment",
+          instrumentType: "x402",
+        },
       })
     })
 
@@ -60,14 +66,14 @@ describe("extractUcpPayment", () => {
         },
       })
 
-      expect(result).not.toBeNull()
+      if (!result.ok) throw new Error(result.code)
       // Should base64-encode the entire credential
-      const decoded = JSON.parse(Buffer.from(result!.eip3009Authorization, "base64").toString("utf-8"))
+      const decoded = JSON.parse(Buffer.from(result.payment.eip3009Authorization, "base64").toString("utf-8"))
       expect(decoded.paymentPayload.signature).toBe("0xabc")
       expect(decoded.paymentRequirements.scheme).toBe("exact")
-      expect(result!.x402Version).toBe(2)
-      expect(result!.handlerId).toBe("xyz.fd.prism_payment")
-      expect(result!.instrumentType).toBe("x402")
+      expect(result.payment.x402Version).toBe(2)
+      expect(result.payment.handlerId).toBe("xyz.fd.prism_payment")
+      expect(result.payment.instrumentType).toBe("x402")
     })
 
     it("uses first instrument when multiple are provided", () => {
@@ -90,8 +96,9 @@ describe("extractUcpPayment", () => {
         },
       })
 
-      expect(result!.eip3009Authorization).toBe("auth-first")
-      expect(result!.handlerId).toBe("handler_a")
+      if (!result.ok) throw new Error(result.code)
+      expect(result.payment.eip3009Authorization).toBe("auth-first")
+      expect(result.payment.handlerId).toBe("handler_a")
     })
 
     it("returns null when instrument has no credential", () => {
@@ -105,7 +112,7 @@ describe("extractUcpPayment", () => {
         },
       })
 
-      expect(result).toBeNull()
+      expect(result).toEqual(MISSING)
     })
 
     it("returns null when credential has no authorization or paymentPayload", () => {
@@ -120,7 +127,7 @@ describe("extractUcpPayment", () => {
         },
       })
 
-      expect(result).toBeNull()
+      expect(result).toEqual(MISSING)
     })
 
     it("handles optional fields gracefully", () => {
@@ -133,10 +140,27 @@ describe("extractUcpPayment", () => {
       })
 
       expect(result).toEqual({
-        eip3009Authorization: "auth-minimal",
-        x402Version: undefined,
-        handlerId: undefined,
+        ok: true,
+        payment: {
+          eip3009Authorization: "auth-minimal",
+          signedSummary: null,
+          x402Version: undefined,
+          handlerId: undefined,
+          instrumentType: undefined,
+        },
       })
+    })
+
+    it("rejects a credential that carries both authorization and paymentPayload", () => {
+      const result = extractUcpPayment({
+        payment: {
+          instruments: [{
+            credential: { type: "x402", authorization: "auth-other", paymentPayload: { payload: {} } },
+          }],
+        },
+      })
+
+      expect(result).toEqual({ ok: false, code: "conflicting_credential" })
     })
   })
 
@@ -146,19 +170,19 @@ describe("extractUcpPayment", () => {
 
   describe("edge cases", () => {
     it("returns null for empty body", () => {
-      expect(extractUcpPayment({})).toBeNull()
+      expect(extractUcpPayment({})).toEqual(MISSING)
     })
 
     it("returns null for body with no payment fields", () => {
-      expect(extractUcpPayment({ foo: "bar" })).toBeNull()
+      expect(extractUcpPayment({ foo: "bar" })).toEqual(MISSING)
     })
 
     it("returns null for payment with empty instruments array", () => {
-      expect(extractUcpPayment({ payment: { instruments: [] } })).toBeNull()
+      expect(extractUcpPayment({ payment: { instruments: [] } })).toEqual(MISSING)
     })
 
     it("returns null for payment without instruments key", () => {
-      expect(extractUcpPayment({ payment: {} })).toBeNull()
+      expect(extractUcpPayment({ payment: {} })).toEqual(MISSING)
     })
   })
 })

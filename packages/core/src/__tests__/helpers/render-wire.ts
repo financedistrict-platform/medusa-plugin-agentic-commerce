@@ -34,6 +34,7 @@ export function serialize(value: unknown): string {
 export function createStoreService(options: RenderOptions) {
   const service = new AgenticCommerceService({}, {
     store_name: "Demo Store",
+    payment_provider_id: "pp_prism_prism",
     storefront_url: "https://store.test",
     ucp_version: options.version,
     ucp_supported_versions: options.supported ?? [],
@@ -56,10 +57,19 @@ export function createRequest(services: Record<string, unknown>, params: Record<
 }
 
 export function createResponse() {
-  const res: { statusCode: number; body: unknown; status(code: number): typeof res; json(body: unknown): typeof res } = {
+  const res: {
+    statusCode: number
+    body: unknown
+    headers: Record<string, string>
+    status(code: number): typeof res
+    set(name: string, value: string): typeof res
+    json(body: unknown): typeof res
+  } = {
     statusCode: 200,
     body: undefined,
+    headers: {},
     status(code: number) { res.statusCode = code; return res },
+    set(name: string, value: string) { res.headers[name.toLowerCase()] = value; return res },
     json(body: unknown) { res.body = body; return res },
   }
   return res

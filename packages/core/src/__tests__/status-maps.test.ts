@@ -16,8 +16,8 @@ describe("resolveUcpStatus", () => {
     }, { completeInProgress: true })).toBe("complete_in_progress")
   })
 
-  it("returns 'canceled' when metadata flag is set", () => {
-    expect(resolveUcpStatus({ metadata: { checkout_session_canceled: true } })).toBe("canceled")
+  it("returns 'canceled' when the agent session is canceled", () => {
+    expect(resolveUcpStatus({ agent_session: { canceled_at: "2026-04-17T00:00:00Z" } })).toBe("canceled")
   })
 
   it("returns 'completed' when cart is completed", () => {
@@ -94,8 +94,8 @@ describe("resolveAcpStatus — all spec status values", () => {
 })
 
 describe("resolveAcpStatus — default resolution", () => {
-  it("returns 'canceled' when metadata flag is set", () => {
-    expect(resolveAcpStatus({ metadata: { checkout_session_canceled: true } })).toBe("canceled")
+  it("returns 'canceled' when the agent session is canceled", () => {
+    expect(resolveAcpStatus({ agent_session: { canceled_at: "2026-04-17T00:00:00Z" } })).toBe("canceled")
   })
 
   it("returns 'completed' when cart is completed", () => {

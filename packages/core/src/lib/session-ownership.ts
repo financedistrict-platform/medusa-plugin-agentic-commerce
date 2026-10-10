@@ -1,46 +1,48 @@
-/**
- * Session ownership utilities.
- *
- * Generates a fingerprint from the caller's identity and stores it in cart
- * metadata at session creation. Subsequent operations verify the fingerprint
- * matches, preventing one agent from modifying another's checkout session.
- *
- * For ACP: fingerprint = SHA-256(API key from Authorization header)
- * For UCP: fingerprint = SHA-256(UCP-Agent header + Bearer token if present)
- *
- * This is defense-in-depth — UCP has no real auth so the fingerprint is
- * based on best-available identity signals. ACP fingerprints are strong
- * because the API key is authenticated.
- */
-
 import crypto from "crypto"
+import type { AgentSessionRecord } from "./agent-session"
+import { presentedApiKey } from "./presented-api-key"
 
-export function computeSessionFingerprint(req: {
-  headers: Record<string, string | string[] | undefined>
-}): string {
-  const apiKey = (req.headers["authorization"] as string)?.replace("Bearer ", "").trim()
-  const ucpAgent = req.headers["ucp-agent"] as string
+export const UCP_SESSION_SECRET_HEADER = "UCP-Session-Secret"
 
-  // ACP: use the authenticated API key
-  if (apiKey) {
-    return crypto.createHash("sha256").update(`acp:${apiKey}`).digest("hex")
-  }
+type HeaderBag = Record<string, string | string[] | undefined>
 
-  // UCP: use UCP-Agent header (best-available, not cryptographically strong)
-  if (ucpAgent) {
-    return crypto.createHash("sha256").update(`ucp:${ucpAgent}`).digest("hex")
-  }
+function digest(scope: string, value: string): string {
+  return crypto.createHash("sha256").update(`${scope}:${value}`).digest("hex")
+}
 
-  return "anonymous"
+function headerValue(headers: HeaderBag, name: string): string | undefined {
+  const value = headers[name.toLowerCase()]
+  return typeof value === "string" ? value.trim() || undefined : undefined
+}
+
+function acpFingerprint(headers: HeaderBag): string | null {
+  const apiKey = presentedApiKey(headers)
+  return apiKey ? digest("acp", apiKey) : null
+}
+
+function ucpFingerprint(headers: HeaderBag): string | null {
+  const secret = headerValue(headers, UCP_SESSION_SECRET_HEADER)
+  return secret ? digest("ucp-session", secret) : null
+}
+
+export function issueUcpSessionSecret(): { secret: string; fingerprint: string } {
+  const secret = crypto.randomBytes(32).toString("base64url")
+  return { secret, fingerprint: digest("ucp-session", secret) }
+}
+
+export type SessionProtocol = "acp" | "ucp"
+
+export function computeSessionFingerprint(protocol: SessionProtocol, headers: HeaderBag): string | null {
+  return protocol === "ucp" ? ucpFingerprint(headers) : acpFingerprint(headers)
 }
 
 export function verifySessionOwnership(
-  cartMetadata: Record<string, unknown> | undefined,
-  fingerprint: string
+  session: Pick<AgentSessionRecord, "session_fingerprint"> | null | undefined,
+  fingerprint: string | null
 ): boolean {
-  if (!cartMetadata?.session_fingerprint) {
-    // Legacy sessions without fingerprint — allow (backwards compat)
-    return true
-  }
-  return cartMetadata.session_fingerprint === fingerprint
+  const stored = session?.session_fingerprint
+  if (!stored || !fingerprint) return false
+  const expected = Buffer.from(stored)
+  const presented = Buffer.from(fingerprint)
+  return expected.length === presented.length && crypto.timingSafeEqual(expected, presented)
 }

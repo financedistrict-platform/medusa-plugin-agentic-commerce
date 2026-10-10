@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import middlewares from "../api/middlewares"
 import AgenticCommerceService from "../modules/agentic-commerce/service"
+import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { createUcpVersionRegistry } from "../lib/ucp-version-registry"
 import { applyUcpSessionPin, type UcpResolution } from "../lib/ucp-version-resolver"
 import { ucpVersionFor, ucpWireFor } from "../lib/ucp-version"
@@ -24,13 +25,13 @@ function pinMiddleware(): Middleware {
   return middleware
 }
 
-function pinRequest(metadata: Record<string, unknown> | undefined, ucp: UcpResolution) {
-  const service = new AgenticCommerceService({}, { ucp_version: "2026-04-08" })
+function pinRequest(pinnedVersion: string | undefined, ucp: UcpResolution) {
+  const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08" })
   const warnings: string[] = []
   const services: Record<string, unknown> = {
     agenticCommerce: service,
     logger: { warn: (message: string) => warnings.push(message) },
-    query: { graph: async () => ({ data: metadata ? [{ id: "cart_1", metadata }] : [] }) },
+    agenticCommerceSession: fakeAgentSessions([{ cart_id: "cart_1", ucp_version: pinnedVersion ?? null }]),
   }
   return {
     req: { params: { id: "cart_1" }, ucp, scope: { resolve: (n: string) => services[n] } },
@@ -70,7 +71,7 @@ describe("applyUcpSessionPin", () => {
 
 describe("enforceSessionVersionPin middleware", () => {
   it("serves 2026-08-25 for a session pinned to 2026-08-25 when the profile is unreachable", async () => {
-    const { req, warnings } = pinRequest({ ucp_version: "2026-08-25" }, resolution("unreachable", "2026-04-08"))
+    const { req, warnings } = pinRequest("2026-08-25", resolution("unreachable", "2026-04-08"))
     let nextCalled = false
     await pinMiddleware()(req, capture(), () => { nextCalled = true })
     expect(nextCalled).toBe(true)
@@ -80,7 +81,7 @@ describe("enforceSessionVersionPin middleware", () => {
   })
 
   it("answers 422 for a session pinned to 2026-08-25 when the profile declares 2026-04-08", async () => {
-    const { req } = pinRequest({ ucp_version: "2026-08-25" }, resolution("matched", "2026-04-08", "2026-04-08"))
+    const { req } = pinRequest("2026-08-25", resolution("matched", "2026-04-08", "2026-04-08"))
     const res = capture()
     let nextCalled = false
     await pinMiddleware()(req, res, () => { nextCalled = true })
@@ -90,7 +91,7 @@ describe("enforceSessionVersionPin middleware", () => {
   })
 
   it("never rejects a session created before pinning existed", async () => {
-    const { req } = pinRequest({ protocol_version: "2026-08-25" }, resolution("matched", "2026-04-08", "2026-04-08"))
+    const { req } = pinRequest(undefined, resolution("matched", "2026-04-08", "2026-04-08"))
     let nextCalled = false
     await pinMiddleware()(req, capture(), () => { nextCalled = true })
     expect(nextCalled).toBe(true)
@@ -105,7 +106,7 @@ describe("ucpVersionFor", () => {
   })
 
   it("falls back to the configured current version before resolution", () => {
-    const service = new AgenticCommerceService({}, { ucp_version: "2026-08-25" })
+    const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism", ucp_version: "2026-08-25" })
     expect(ucpVersionFor({ scope: { resolve: () => service } })).toBe("2026-08-25")
   })
 })

@@ -1,44 +1,10 @@
-/**
- * Prism Gateway API Client
- *
- * Handles the merchant-side Prism integration using protocol-specific
- * endpoints (separate UCP and ACP variants — the older generic
- * `payment-profile` and `checkout-prepare` endpoints are deprecated).
- *
- * Endpoints used:
- * - GET  /api/v2/merchant/ucp/handlers              — UCP discovery
- * - GET  /api/v2/merchant/acp/handlers              — ACP discovery
- * - POST /api/v2/merchant/ucp/payment-requirements  — UCP checkout prepare
- * - POST /api/v2/merchant/acp/payment-requirements  — ACP checkout prepare
- *
- * Settlement is handled by the Prism payment provider module directly,
- * not via this client.
- *
- * Configuration via plugin options:
- *   api_url  — Prism Gateway base URL (default: https://prism-gw.fd.xyz)
- *   api_key  — Merchant API key from Prism Console
- */
-
-// =====================================================
-// Shared payment-requirements input
-// =====================================================
-
 export type PreparePaymentInput = {
-  /** Amount in standard units as string (e.g., "15.00" for $15). Prism expects full amount, not cents. */
   amount: string
-  /** ISO 4217 currency code (e.g., "USD", "EUR") */
   currency: string
-  /** Unique URL for this checkout session (used as x402 resource binding) */
   resourceUrl: string
-  /** Human-readable description of what's being purchased */
   resourceDescription: string
 }
 
-// =====================================================
-// UCP shapes (per Prism OpenAPI)
-// =====================================================
-
-/** A single UCP discovery entry — `/ucp/handlers` returns these keyed by namespace */
 export type UcpHandlerDiscoveryEntry = {
   id: string
   version: string
@@ -50,7 +16,6 @@ export type UcpHandlerDiscoveryEntry = {
   config: unknown
 }
 
-/** UCP discovery response: `{ "xyz.fd.prism_payment": [...] }` */
 export type UcpHandlersDiscoveryResponse = Record<string, UcpHandlerDiscoveryEntry[]>
 
 const PRISM_UCP_HANDLER_ID = "xyz.fd.prism_payment"
@@ -85,24 +50,14 @@ export function isContractEntry(data: unknown): data is UcpHandlersDiscoveryResp
   return normalizeUcpHandlers(data) !== null
 }
 
-/** A single UCP checkout-prepare entry — same namespace keying, smaller shape */
 export type UcpCheckoutHandlerEntry = {
   id: string
   version: string
   config: PaymentHandlerConfig
 }
 
-/** UCP checkout-prepare response: `{ "xyz.fd.prism_payment": [...] }` */
 export type UcpCheckoutPrepareResponse = Record<string, UcpCheckoutHandlerEntry[]>
 
-// =====================================================
-// ACP shapes (per Prism OpenAPI)
-// =====================================================
-
-/**
- * A single ACP handler descriptor. Used both for discovery (`config` is `{}`)
- * and for checkout-prepare (`config` is a `PaymentHandlerConfig`).
- */
 export type AcpHandler = {
   id: string
   name: string
@@ -116,10 +71,6 @@ export type AcpHandler = {
   config: PaymentHandlerConfig | Record<string, unknown>
 }
 
-// =====================================================
-// x402 PaymentHandlerConfig — shared by UCP and ACP
-// =====================================================
-
 export type PaymentHandlerConfig = {
   x402Version: number
   resource: {
@@ -130,44 +81,19 @@ export type PaymentHandlerConfig = {
 }
 
 export type X402AcceptEntry = {
-  /** Payment scheme (e.g., "exact" for EIP-3009) */
   scheme: string
-  /** Chain identifier in CAIP-2 format (e.g., "eip155:8453" for Base) */
   network: string
-  /** Amount in token base units as string (e.g., "120000000" for 120 USDC) */
   amount?: string | null
-  /** Token contract address */
   asset: string
-  /** Merchant settlement address */
   payTo: string
-  /** Maximum time for authorization validity */
   maxTimeoutSeconds: number
-  /** Additional metadata (token name, version, etc.) */
   extra?: Record<string, unknown> | null
 }
 
-// =====================================================
-// Client
-// =====================================================
+const SUPPORTED_X402_VERSIONS: readonly number[] = [1, 2]
 
-import { SETTLEMENT_FALLBACK_UCP_VERSION } from "./settlement-ucp-version"
-
-const UCP_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-
-function userAgent(ucpVersion: string): string {
-  if (typeof ucpVersion !== "string" || !UCP_VERSION_PATTERN.test(ucpVersion)) {
-    throw new Error(
-      `Prism call needs a UCP version date (YYYY-MM-DD) but got ${JSON.stringify(ucpVersion)}. ` +
-        "Upgrade @financedistrict/medusa-plugin-agentic-commerce together with the prism-payment plugin.",
-    )
-  }
-  return `fd-medusa-prism/${ucpVersion}`
-}
-
-function settlementUserAgent(ucpVersion: unknown): string {
-  const version =
-    typeof ucpVersion === "string" && UCP_VERSION_PATTERN.test(ucpVersion) ? ucpVersion : SETTLEMENT_FALLBACK_UCP_VERSION
-  return userAgent(version)
+export function isSupportedX402Version(version: unknown): version is number {
+  return typeof version === "number" && SUPPORTED_X402_VERSIONS.includes(version)
 }
 
 export type PrismPaymentRequest = {
@@ -181,101 +107,68 @@ export type PrismClientOptions = {
   apiKey?: string
 }
 
+export function resolvePrismApiKey(configured?: unknown): string {
+  const fromOptions = typeof configured === "string" ? configured.trim() : ""
+  return fromOptions || (process.env.PRISM_API_KEY ?? "").trim()
+}
+
 export class PrismClient {
   private apiUrl: string
   private apiKey: string
 
   constructor(options: PrismClientOptions = {}) {
     this.apiUrl = options.apiUrl || process.env.PRISM_API_URL || "https://prism-gw.fd.xyz"
-    this.apiKey = options.apiKey || process.env.PRISM_API_KEY || ""
+    this.apiKey = resolvePrismApiKey(options.apiKey)
   }
 
-  // -------------------------------------------------
-  // UCP
-  // -------------------------------------------------
-
-  /**
-   * Fetch UCP handler descriptors for `.well-known/ucp` discovery.
-   * Returns the raw Prism response keyed by handler namespace.
-   */
   async fetchUcpHandlers(ucpVersion: string): Promise<UcpHandlersDiscoveryResponse> {
     if (!this.apiKey) {
       console.warn("[prism-client] No PRISM_API_KEY configured, returning empty UCP handlers")
       return {}
     }
-    return this.get<UcpHandlersDiscoveryResponse>("/api/v2/merchant/ucp/handlers", ucpVersion)
+    return this.get<UcpHandlersDiscoveryResponse>(`/ucp/${encodeURIComponent(ucpVersion)}/handlers`)
   }
 
   getApiUrl(): string {
     return this.apiUrl
   }
 
-  /**
-   * Convert a fiat amount to UCP-shaped x402 payment requirements for
-   * a checkout session.
-   */
-  async prepareUcpPayment(input: PreparePaymentInput, ucpVersion: string): Promise<UcpCheckoutPrepareResponse> {
+  getApiKey(): string {
+    return this.apiKey
+  }
+
+  async preparePayment(input: PreparePaymentInput): Promise<PaymentHandlerConfig> {
     if (!this.apiKey) {
-      console.warn("[prism-client] No PRISM_API_KEY configured, returning empty UCP prepare")
-      return {}
+      throw new Error("No PRISM_API_KEY configured")
     }
-    return this.post<UcpCheckoutPrepareResponse>(
-      "/api/v2/merchant/ucp/payment-requirements",
+    return this.post<PaymentHandlerConfig>(
+      "/api/v2/merchant/payment-requirements",
       this.preparePayload(input),
-      userAgent(ucpVersion),
     )
   }
 
-  // -------------------------------------------------
-  // ACP
-  // -------------------------------------------------
-
-  /**
-   * Fetch ACP handler descriptors for `.well-known/acp.json` discovery.
-   * Returns the raw Prism response (a flat array of handler objects).
-   */
-  async fetchAcpHandlers(ucpVersion: string): Promise<AcpHandler[]> {
+  async fetchAcpHandlers(): Promise<AcpHandler[]> {
     if (!this.apiKey) {
       console.warn("[prism-client] No PRISM_API_KEY configured, returning empty ACP handlers")
       return []
     }
-    return this.get<AcpHandler[]>("/api/v2/merchant/acp/handlers", ucpVersion)
+    return this.get<AcpHandler[]>("/api/v2/merchant/acp/handlers")
   }
 
-  /**
-   * Convert a fiat amount to a fully-formed ACP handler descriptor for
-   * a checkout session (includes the resolved x402 config).
-   */
-  async prepareAcpPayment(input: PreparePaymentInput, ucpVersion: string): Promise<AcpHandler> {
-    if (!this.apiKey) {
-      throw new Error("No PRISM_API_KEY configured")
+  async verifyPayment(request: PrismPaymentRequest): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(this.paymentPath(request, "verify"), request)
+  }
+
+  async settlePayment(request: PrismPaymentRequest): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(this.paymentPath(request, "settle"), request)
+  }
+
+  private paymentPath(request: PrismPaymentRequest, action: "verify" | "settle"): string {
+    if (!isSupportedX402Version(request.x402Version)) {
+      throw new Error(`Unsupported x402 version: ${String(request.x402Version)}`)
     }
-    return this.post<AcpHandler>(
-      "/api/v2/merchant/acp/payment-requirements",
-      this.preparePayload(input),
-      userAgent(ucpVersion),
-    )
+    return `/api/v${request.x402Version}/payment/${action}`
   }
-
-  async verifyPayment(request: PrismPaymentRequest, ucpVersion?: unknown): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
-      `/api/v${request.x402Version}/payment/verify`,
-      request,
-      settlementUserAgent(ucpVersion),
-    )
-  }
-
-  async settlePayment(request: PrismPaymentRequest, ucpVersion?: unknown): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
-      `/api/v${request.x402Version}/payment/settle`,
-      request,
-      settlementUserAgent(ucpVersion),
-    )
-  }
-
-  // -------------------------------------------------
-  // Internal helpers
-  // -------------------------------------------------
 
   private preparePayload(input: PreparePaymentInput) {
     return {
@@ -288,10 +181,10 @@ export class PrismClient {
     }
   }
 
-  private async get<T>(path: string, ucpVersion: string): Promise<T> {
+  private async get<T>(path: string): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "GET",
-      headers: { "X-API-Key": this.apiKey, "User-Agent": userAgent(ucpVersion) },
+      headers: { "X-API-Key": this.apiKey },
     })
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error")
@@ -301,13 +194,12 @@ export class PrismClient {
     return response.json() as Promise<T>
   }
 
-  private async post<T>(path: string, body: unknown, agent: string): Promise<T> {
+  private async post<T>(path: string, body: unknown): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": this.apiKey,
-        "User-Agent": agent,
       },
       body: JSON.stringify(body),
     })

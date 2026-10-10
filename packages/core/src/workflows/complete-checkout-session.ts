@@ -5,13 +5,18 @@ import {
   when,
 } from "@medusajs/framework/workflows-sdk"
 import {
+  acquireLockStep,
   completeCartWorkflow,
   capturePaymentWorkflow,
+  releaseLockStep,
   useQueryGraphStep,
 } from "@medusajs/medusa/core-flows"
 import { validateCheckoutPrerequisitesStep } from "./steps/validate-checkout-prerequisites"
 import { ensureShippingMethodStep } from "./steps/ensure-shipping-method"
+import { ensurePaymentCollectionStep } from "./steps/ensure-payment-collection"
 import { setupPaymentStep } from "./steps/setup-payment"
+import { reservePaymentAuthorizationStep } from "./steps/reserve-payment-authorization"
+import { paymentToCapture } from "../lib/payment-to-capture"
 
 type CompleteCheckoutSessionInput = {
   cart_id: string
@@ -41,6 +46,10 @@ const completeCheckoutSessionWorkflow = createWorkflow(
     // Step 2: Ensure shipping method is set
     ensureShippingMethodStep({ cart_id: input.cart_id })
 
+    ensurePaymentCollectionStep({ cart_id: input.cart_id })
+
+    acquireLockStep({ key: input.cart_id, timeout: 30, ttl: 120 })
+
     // Step 3: Setup payment collection + session
     const paymentData = transform(input, (input) => {
       // Pass EIP-3009 authorization or legacy token to the payment session
@@ -63,6 +72,8 @@ const completeCheckoutSessionWorkflow = createWorkflow(
       }
     })
 
+    reservePaymentAuthorizationStep(paymentData)
+
     setupPaymentStep(paymentData)
 
     // Step 4: Complete the cart → creates the order
@@ -80,20 +91,27 @@ const completeCheckoutSessionWorkflow = createWorkflow(
     // real on-chain settlement.
     const paymentQuery = useQueryGraphStep({
       entity: "cart",
-      fields: ["id", "payment_collection.payments.id"],
+      fields: [
+        "id",
+        "payment_collection.payments.id",
+        "payment_collection.payments.provider_id",
+        "payment_collection.payments.captured_at",
+        "payment_collection.payments.canceled_at",
+      ],
       filters: { id: input.cart_id },
     }).config({ name: "fetch-payment-id-for-capture" })
 
-    const paymentId = transform(paymentQuery, (q) => {
-      const payments = (q.data?.[0] as any)?.payment_collection?.payments || []
-      return payments[0]?.id || null
-    })
+    const paymentId = transform({ paymentQuery, input }, ({ paymentQuery, input }) =>
+      paymentToCapture(paymentQuery as Parameters<typeof paymentToCapture>[0], input.payment_provider_id)
+    )
 
     when({ paymentId }, ({ paymentId }) => !!paymentId).then(() => {
       capturePaymentWorkflow.runAsStep({
         input: transform(paymentId, (id) => ({ payment_id: id as string })),
       })
     })
+
+    releaseLockStep({ key: input.cart_id })
 
     // Step 6: Extract order info from result.
     // completeCartWorkflow returns { id: order.id } per Medusa core-flows, but

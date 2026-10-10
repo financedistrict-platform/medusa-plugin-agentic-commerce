@@ -6,30 +6,31 @@ import {
   normalizePrismHandlerId,
   PRISM_UCP_HANDLER_ID,
 } from "../lib/ucp-complete-guard"
+import { extractSignedSummary } from "../lib/validate-signed-amount"
+
+const toBase64 = (credential: unknown) => Buffer.from(JSON.stringify(credential)).toString("base64")
 
 const credential = {
   type: "x402",
   x402Version: 2,
   paymentPayload: {
-    accepted: { network: "eip155:84532", asset: "0xAsset" },
-    payload: { authorization: { value: "1500000", to: "0xMerchant" } },
+    accepted: { network: "eip155:84532", asset: "0xAsset", amount: "1500000", payTo: "0xMerchant" },
+    payload: { authorization: { from: "0x2222222222222222222222222222222222222222", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101", value: "1500000", to: "0xMerchant" } },
   },
   paymentRequirements: { scheme: "exact" },
 }
 const { type: _type, ...untypedCredential } = credential
 
-const quotedMetadata = {
-  prism_checkout_data: {
-    ucp: {
-      [PRISM_UCP_HANDLER_ID]: [{
-        id: "x402",
-        version: "2026-01-15",
-        config: {
-          x402Version: 2,
-          accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }],
-        },
-      }],
-    },
+const storedQuote = {
+  ucp: {
+    [PRISM_UCP_HANDLER_ID]: [{
+      id: "x402",
+      version: "2026-01-15",
+      config: {
+        x402Version: 2,
+        accepts: [{ network: "eip155:84532", asset: "0xasset", amount: "1500000", payTo: "0xmerchant" }],
+      },
+    }],
   },
 }
 
@@ -58,16 +59,16 @@ describe("original-era instruments", () => {
 describe("quote binding with original-era handler ids", () => {
   it.each([PRISM_UCP_HANDLER_ID, "x402", undefined])("finds the stored quote for handler_id %s", (handlerId) => {
     expect(normalizePrismHandlerId(handlerId)).toBe(PRISM_UCP_HANDLER_ID)
-    expect(checkQuoteBinding(quotedMetadata, handlerId, credential)).toBeNull()
+    expect(checkQuoteBinding(storedQuote, handlerId, extractSignedSummary(toBase64(credential)))).toBeNull()
   })
 
   it("keeps rejecting a tampered amount for an original-era instrument", () => {
-    const tampered = { ...credential, paymentPayload: { ...credential.paymentPayload, payload: { authorization: { value: "1", to: "0xMerchant" } } } }
-    expect(checkQuoteBinding(quotedMetadata, "x402", tampered)).toMatchObject({ status: 422, code: "amount_mismatch" })
+    const tampered = { ...credential, paymentPayload: { ...credential.paymentPayload, payload: { authorization: { from: "0x2222222222222222222222222222222222222222", nonce: "0x0101010101010101010101010101010101010101010101010101010101010101", value: "1", to: "0xMerchant" } } } }
+    expect(checkQuoteBinding(storedQuote, "x402", extractSignedSummary(toBase64(tampered)))).toMatchObject({ status: 422, code: "amount_mismatch" })
   })
 
   it("does not map other handler ids onto the Prism quote", () => {
     expect(normalizePrismHandlerId("com.other.pay")).toBe("com.other.pay")
-    expect(checkQuoteBinding(quotedMetadata, "com.other.pay", credential)).toMatchObject({ status: 422, code: "no_payment_quote" })
+    expect(checkQuoteBinding(storedQuote, "com.other.pay", extractSignedSummary(toBase64(credential)))).toMatchObject({ status: 422, code: "no_payment_quote" })
   })
 })

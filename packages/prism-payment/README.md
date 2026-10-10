@@ -65,7 +65,13 @@ export default defineConfig({
       },
     },
 
-    // 3. Core agentic commerce service (references the adapter above)
+    // 3. Agent session module (stores the payment quote server-side)
+    {
+      key: "agenticCommerceSession",
+      resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agent-session",
+    },
+
+    // 4. Core agentic commerce service (references the adapter above)
     {
       key: "agenticCommerce",
       resolve: "@financedistrict/medusa-plugin-agentic-commerce/modules/agentic-commerce",
@@ -73,6 +79,7 @@ export default defineConfig({
         api_key: process.env.AGENTIC_COMMERCE_API_KEY,
         storefront_url: process.env.STOREFRONT_URL,
         store_name: "Your Store",
+        payment_provider_id: "pp_prism_prism",
         payment_handler_adapters: ["prismPaymentHandler"],
       },
     },
@@ -176,7 +183,7 @@ Implements the `PaymentHandlerAdapter` interface from the core plugin:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_url` | `string` | `"https://prism-gw.fd.xyz"` | Prism Gateway API base URL |
-| `api_key` | `string` | `""` | Merchant API key from Prism Console |
+| `api_key` | `string` | `PRISM_API_KEY` | Merchant API key from Prism Console. Required |
 
 ### Payment Provider
 
@@ -191,6 +198,16 @@ A standard Medusa v2 payment provider that handles the settlement side:
 | `capturePayment` | Settles the authorization on-chain via Prism |
 | `refundPayment` | Initiates refund through Prism |
 | `cancelPayment` | Cancels the payment session |
+
+Network, token, recipient and amount come from the quote stored for the cart, never from the credential. A credential is accepted only when the requirements it declares (`paymentPayload.accepted`) match that quote, and Prism is always asked to verify and settle against the quoted requirements. The optional `supported_chains` option limits the quoted networks the provider will settle on; list network names such as `base` or CAIP-2 identifiers such as `eip155:8453`. When it is not set, the quote alone decides the network.
+
+The one-cart-per-authorization rule is enforced by the agentic commerce checkout workflow. Do not enable the Prism provider on regions that are also used by Medusa's own store checkout.
+
+The provider and the `prism-payment-handler` module refuse to start when neither the `api_key` option nor the `PRISM_API_KEY` environment variable holds a key, because every payment would be rejected without one. A value of only whitespace counts as no key, and whitespace around a key is removed.
+
+The quote is signed together with the cart resource it was prepared for, so two carts with the same total never share a quote. The quoted total is written as a plain decimal in major units (never with an exponent), and a stored quote is reused only when the resource, the total and the currency all match the cart; a cart total that is not a plain non-negative amount is not quoted. The x402 version always comes from the quote and must be `1` or `2`; any other value is refused before Prism is called. If the verification call fails or does not answer valid, the payment is not authorized and nothing is settled. With `auto_capture` off, a stored authorization is marked `verified` only when Prism verified it.
+
+A settlement counts only when Prism replies `success: true` with a transaction hash. If the reply also reports a network or amount, they must equal the quoted ones. The provider records the transaction, network, token and settled amount on the payment session (the amount is the quoted amount that the signed authorization was bound to, not a figure Prism reports), and refuses to capture a payment whose settled amount, quote and order total no longer agree.
 
 ## Configuration
 

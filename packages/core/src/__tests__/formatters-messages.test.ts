@@ -18,6 +18,7 @@ const ctx = {
 describe("UCP formatter — spec-compliant messages", () => {
   it("emits error message with recoverable severity for missing shipping_address", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
@@ -37,6 +38,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 
   it("emits error for missing email with recoverable severity", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_2",
       items: [{ id: "i1", quantity: 1 }],
       shipping_address: { address_1: "123 Main St" },
@@ -51,6 +53,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 
   it("emits error for empty cart with recoverable severity", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_3",
       items: [],
     }, "https://api.test/ucp/checkout-sessions") as any
@@ -63,6 +66,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 
   it("emits info message (no severity, no non-spec fields) when ready_for_complete", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_4",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
@@ -81,6 +85,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 
   it("all messages use only spec-allowed types (error/warning/info)", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_5",
       items: [],
     }, "https://api.test/ucp/checkout-sessions") as any
@@ -92,6 +97,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 
   it("emits 3 recoverable errors when all fields are missing", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_6",
       items: [],
     }, "https://api.test/ucp/checkout-sessions") as any
@@ -103,6 +109,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 
   it("emits info with code 'checkout_completed' and no severity when completed", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_7",
       completed_at: "2026-04-17T00:00:00Z",
       items: [{ id: "i1", quantity: 1 }],
@@ -118,6 +125,7 @@ describe("UCP formatter — spec-compliant messages", () => {
 describe("UCP formatter — spec-compliant top-level structure", () => {
   it("includes all required fields per checkout.json", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1, unit_price: 1000 }],
       subtotal: 1000,
@@ -136,6 +144,7 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
 
   it("uses spec buyer fields (first_name, last_name, email, phone_number)", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
@@ -158,6 +167,7 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
 
   it("uses spec postal_address fields for shipping_address", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       shipping_address: {
@@ -189,6 +199,7 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
   it("emits expires_at as RFC 3339 timestamp, defaulting to +6h from created_at", () => {
     const createdAt = "2026-04-17T00:00:00.000Z"
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       created_at: createdAt,
@@ -201,6 +212,7 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
     // Per UCP Fulfillment Extension (shopping/fulfillment.json), checkout is
     // extended with a `fulfillment` field containing methods → groups → options.
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       shipping_address: { address_1: "123 Main St" },
@@ -213,6 +225,7 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
 
   it("uppercases currency code per spec (ISO 4217)", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       currency_code: "eur",
@@ -225,6 +238,7 @@ describe("UCP formatter — spec-compliant top-level structure", () => {
 describe("UCP formatter — totals per spec", () => {
   it("always emits subtotal and total entries", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       subtotal: 1000,
@@ -239,6 +253,7 @@ describe("UCP formatter — totals per spec", () => {
 
   it("emits discount amount as negative per spec", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       subtotal: 1000,
@@ -256,6 +271,7 @@ describe("UCP formatter — totals per spec", () => {
   // UCP spec requires subtotal = items only.
   it("subtotal is items only, NOT including shipping (spec: items pre-shipping)", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", unit_price: 2900, quantity: 1 }],
       // Cart may report subtotal inclusive of shipping — we must ignore that
@@ -275,6 +291,7 @@ describe("UCP formatter — totals per spec", () => {
 
   it("subtotal sums unit_price * quantity across multiple line items", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [
         { id: "i1", unit_price: 10, quantity: 3 }, // 30
@@ -288,6 +305,7 @@ describe("UCP formatter — totals per spec", () => {
 
   it("falls back to item_subtotal when items[] is absent", () => {
     const session = formatUcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [],
       item_subtotal: 1200,
@@ -303,6 +321,7 @@ describe("UCP formatter — totals per spec", () => {
 describe("ACP formatter — subtotal regression", () => {
   it("subtotal is items only, not items+shipping", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", unit_price: 2900, quantity: 1 }],
       subtotal: 2905,
@@ -320,6 +339,7 @@ describe("ACP formatter — subtotal regression", () => {
 describe("ACP formatter — spec-compliant top-level structure", () => {
   it("includes required fields per schema.agentic_checkout.json", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1, unit_price: 1000 }],
       subtotal: 1000,
@@ -343,6 +363,7 @@ describe("ACP formatter — spec-compliant top-level structure", () => {
 
   it("emits item shape per spec: { id, name, unit_amount }", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "li_1", variant_id: "var_1", title: "T-shirt", unit_price: 1500, quantity: 2 }],
     }, "https://api.test/acp/checkout_sessions") as any
@@ -361,6 +382,7 @@ describe("ACP formatter — spec-compliant top-level structure", () => {
 
   it("line_item totals use spec-allowed type (items_base_amount)", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "li_1", unit_price: 1000, quantity: 1 }],
     }, "https://api.test/acp/checkout_sessions") as any
@@ -375,6 +397,7 @@ describe("ACP formatter — spec-compliant top-level structure", () => {
 describe("ACP formatter — spec-compliant messages", () => {
   it("emits error with spec code 'missing' and severity enum for shipping", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
@@ -391,6 +414,7 @@ describe("ACP formatter — spec-compliant messages", () => {
 
   it("does not emit non-spec content_type MIME values", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [],
     }, "https://api.test/acp/checkout_sessions") as any
@@ -404,6 +428,7 @@ describe("ACP formatter — spec-compliant messages", () => {
 
   it("emits error with JSONPath param per spec", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [],
     }, "https://api.test/acp/checkout_sessions") as any
@@ -414,6 +439,7 @@ describe("ACP formatter — spec-compliant messages", () => {
 
   it("transitions to ready_for_payment with items + email + address", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_2",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
@@ -427,6 +453,7 @@ describe("ACP formatter — spec-compliant messages", () => {
 describe("ACP formatter — spec address", () => {
   it("emits address without non-spec phone_number field", () => {
     const session = formatAcpCheckoutSession(ctx, {
+      agent_session: null,
       id: "cart_1",
       items: [{ id: "i1", quantity: 1 }],
       email: "buyer@example.com",
