@@ -35,3 +35,11 @@ describe("session state is written by the server, not into cart metadata", () =>
     expect(steps.indexOf("cancel-agent-session")).toBeLessThan(steps.indexOf("release-lock-step"))
   })
 })
+
+describe("an unsupported currency is refused before the cart is created", () => {
+  it("validates the currency ahead of the cart creation", () => {
+    const steps = stepsOf("create-checkout-session")
+    expect(steps.indexOf("validate-currency")).toBe(0)
+    expect(steps.indexOf("validate-currency")).toBeLessThan(steps.indexOf("create-cart-as-step"))
+  })
+})

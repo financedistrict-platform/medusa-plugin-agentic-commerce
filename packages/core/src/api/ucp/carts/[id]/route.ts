@@ -4,6 +4,7 @@ import { fetchSessionCart } from "../../../../lib/agent-session"
 import { ucpAddressToMedusa } from "../../../../lib/address-translator"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { ucpErrorFor, ucpVersionFor } from "../../../../lib/ucp-version"
+import { respondUcpFailure } from "../../../../lib/client-errors"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -77,10 +78,7 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
     const formatted = agenticCommerceService.formatUcpCart(cart, baseUrl, ucpVersionFor(req))
 
     res.json(formatted)
-  } catch (error: any) {
-    res.status(500).json(ucpErrorFor(req, {
-      code: "internal_error",
-      content: error.message,
-    }))
+  } catch (error: unknown) {
+    respondUcpFailure(req, res, error)
   }
 }

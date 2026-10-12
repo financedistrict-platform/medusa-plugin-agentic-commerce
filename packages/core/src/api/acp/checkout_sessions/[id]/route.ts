@@ -2,7 +2,8 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import updateCheckoutSessionWorkflow from "../../../../workflows/update-checkout-session"
 import { fetchSessionCart } from "../../../../lib/agent-session"
 import { acpAddressToMedusa } from "../../../../lib/address-translator"
-import { formatAcpError, httpStatusToAcpType } from "../../../../lib/error-formatters"
+import { formatAcpError } from "../../../../lib/error-formatters"
+import { respondAcpFailure } from "../../../../lib/client-errors"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
 
@@ -132,12 +133,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const session = agenticCommerceService.formatAcpCheckoutSession(updatedCart || cart, baseUrl)
 
     res.json(session)
-  } catch (error: any) {
-    const statusCode = error.type === "invalid_data" ? 400 : 500
-    res.status(statusCode).json(formatAcpError({
-      type: httpStatusToAcpType(statusCode),
-      code: error.type || "internal_error",
-      message: error.message,
-    }))
+  } catch (error: unknown) {
+    respondAcpFailure(res, error)
   }
 }

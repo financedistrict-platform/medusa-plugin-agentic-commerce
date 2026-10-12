@@ -12,6 +12,7 @@ import {
 } from "@medusajs/medusa/core-flows"
 import { useQueryGraphStep } from "@medusajs/medusa/core-flows"
 import { openAgentSessionStep } from "./steps/open-agent-session"
+import { validateCurrencyStep } from "./steps/validate-currency"
 
 type CreateCheckoutSessionInput = {
   items: { variant_id: string; quantity: number }[]
@@ -32,6 +33,8 @@ type CreateCheckoutSessionInput = {
 const createCheckoutSessionWorkflow = createWorkflow(
   "create-checkout-session",
   (input: CreateCheckoutSessionInput) => {
+    validateCurrencyStep({ currency_code: input.currency_code })
+
     // Step 1: Resolve region if not provided
     const regions = useQueryGraphStep({
       entity: "region",
