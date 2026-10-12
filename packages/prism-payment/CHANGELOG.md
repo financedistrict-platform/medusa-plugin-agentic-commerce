@@ -1,5 +1,11 @@
 # @financedistrict/medusa-plugin-prism-payment
 
+## 1.1.5
+
+### Patch Changes
+
+- [#62](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/62) [`12ea2e8`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/12ea2e8667c20c9506598c530093861751e261e5) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Verify and settle requests to Prism now carry the `resource` of the signed payment quote. Without it Prism could not record the settlement and every payment failed with `payment_failed`. A credential that names a different `resource` url than the quote is rejected with `resource_mismatch`; a credential that names none is accepted.
+
 ## 1.1.4
 
 ### Patch Changes
