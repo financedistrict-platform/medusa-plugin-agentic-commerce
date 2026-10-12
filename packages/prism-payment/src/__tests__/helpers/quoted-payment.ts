@@ -5,6 +5,7 @@ export const ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 export const MERCHANT = "0x1111111111111111111111111111111111111111"
 export const QUOTED_VALUE = "1500000"
 export const CART_TOTAL = 15
+export const QUOTED_RESOURCE_URL = "https://shop.test/ucp/checkout-sessions/cart_1"
 export const NONCE = `0x${"ab".repeat(32)}`
 
 export const quotedEntry = {
@@ -23,11 +24,11 @@ export const settledPayment = { transaction: "0xtx", network: NETWORK, asset: AS
 
 export function unsignedCheckoutData(accepts: Record<string, unknown>[] = [quotedEntry]) {
   return {
-    ucp: { "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", config: { x402Version: 2, resource: { url: "https://shop.test/ucp/checkout-sessions/cart_1" }, accepts } }] },
+    ucp: { "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", config: { x402Version: 2, resource: { url: QUOTED_RESOURCE_URL }, accepts } }] },
     acp: null,
     preparedAmount: String(CART_TOTAL),
     preparedCurrency: "usd",
-    preparedResourceUrl: "https://shop.test/ucp/checkout-sessions/cart_1",
+    preparedResourceUrl: QUOTED_RESOURCE_URL,
   }
 }
 
@@ -49,6 +50,7 @@ export type Overrides = {
   declared?: Record<string, unknown>
   omitAccepted?: boolean
   legacyNetwork?: string
+  resource?: unknown
 }
 
 export function credential(overrides: Overrides = {}) {
@@ -73,6 +75,7 @@ export function credential(overrides: Overrides = {}) {
   const paymentPayload: Record<string, unknown> = { x402Version: 2, payload: { signature: "0xsig", authorization } }
   if (!overrides.omitAccepted) paymentPayload.accepted = accepted
   if (overrides.legacyNetwork) paymentPayload.network = overrides.legacyNetwork
+  if ("resource" in overrides) paymentPayload.resource = overrides.resource
   return {
     x402Version: 2,
     paymentPayload,

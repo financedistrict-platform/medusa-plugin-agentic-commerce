@@ -6,6 +6,7 @@ import {
   ASSET,
   CART_TOTAL,
   NETWORK,
+  QUOTED_RESOURCE_URL,
   QUOTED_VALUE,
   QUOTE_SIGNING_KEY,
   checkoutData,
@@ -257,10 +258,9 @@ describe("Prism provider tamper cases", () => {
   })
 
   it("forwards only the signed fields of the payload and nothing else the buyer attached", async () => {
-    const cred = credential()
+    const cred = credential({ resource: { url: QUOTED_RESOURCE_URL, description: "buyer" } })
     const payload = cred.paymentPayload as Record<string, any>
     payload.extensions = { gasSponsoring: { info: "buyer" } }
-    payload.resource = { url: "https://elsewhere.test" }
     payload.payload.extra = "buyer"
     payload.payload.authorization.extra = "buyer"
 
@@ -270,10 +270,42 @@ describe("Prism provider tamper cases", () => {
     const forwarded = client.settlePayment.mock.calls[0][0].paymentPayload
     expect(forwarded).toEqual({
       x402Version: 2,
+      resource: { url: QUOTED_RESOURCE_URL },
       accepted: quotedEntry,
       payload: { signature: "0xsig", authorization: expect.not.objectContaining({ extra: expect.anything() }) },
     })
     expect(Object.keys(forwarded.payload.authorization).sort()).toEqual(["from", "nonce", "to", "validAfter", "validBefore", "value"])
+  })
+
+  it("forwards the quoted resource to verify and settle when the buyer names none", async () => {
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential()) } as any)
+
+    expect(result.status).toBe("authorized")
+    expect(client.verifyPayment.mock.calls[0][0].paymentPayload.resource).toEqual({ url: QUOTED_RESOURCE_URL })
+    expect(client.settlePayment.mock.calls[0][0].paymentPayload.resource).toEqual({ url: QUOTED_RESOURCE_URL })
+  })
+
+  it("accepts a credential whose resource is the quoted one", async () => {
+    const result = await provider.authorizePayment({
+      data: await sessionData(provider, credential({ resource: { url: QUOTED_RESOURCE_URL } })),
+    } as any)
+
+    expect(result.status).toBe("authorized")
+  })
+
+  it("rejects a credential that names another resource than the quote", async () => {
+    await expectRejected(
+      await sessionData(provider, credential({ resource: { url: "https://elsewhere.test" } })),
+      "resource_mismatch",
+    )
+  })
+
+  it.each([
+    ["a null resource", null],
+    ["a resource without a url", {}],
+    ["a resource that is not an object", "https://shop.test/ucp/checkout-sessions/cart_1"],
+  ])("rejects a credential carrying %s", async (_label, resource) => {
+    await expectRejected(await sessionData(provider, credential({ resource })), "resource_mismatch")
   })
 
   it("does not forward a network the buyer put on the payload next to the declared requirements", async () => {
