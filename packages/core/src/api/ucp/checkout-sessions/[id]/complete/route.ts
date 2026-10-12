@@ -11,6 +11,7 @@ import {
   PAYMENT_AUTHORIZATION_USED_MESSAGE,
 } from "../../../../../lib/payment-ledger"
 import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
+import { isAlreadyCompleted } from "../../../../../lib/client-errors"
 import { CompleteUcpCheckoutSessionSchema } from "../../../../validation-schemas"
 import {
   checkPrismInstrument,
@@ -164,6 +165,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       },
     })
   } catch (error: unknown) {
+    if (isAlreadyCompleted(error)) {
+      res.status(409).json(ucpErrorFor(req, {
+        code: "already_completed",
+        content: "Checkout session has already been completed",
+        severity: "unrecoverable",
+      }))
+      return
+    }
+
     console.error(`[agentic-commerce] UCP checkout complete failed for ${id}: ${error instanceof Error ? error.message : String(error)}`)
     // On payment failure, refresh payment state
     try {
