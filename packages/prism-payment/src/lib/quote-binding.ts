@@ -23,6 +23,7 @@ export type QuoteBindingError =
   | "missing_eip3009_fields"
   | "no_matching_quote_entry"
   | "accepted_requirements_mismatch"
+  | "resource_mismatch"
   | "unsupported_chain"
   | "amount_mismatch"
   | "wrong_recipient"
@@ -110,6 +111,7 @@ export function bindAuthorizationToQuote(
   const requirements = declared ? quotedEntryFor(declared, quote) : null
   if (!declared || !requirements) return fail("no_matching_quote_entry")
   if (!declaresQuotedTerms(declared, requirements)) return fail("accepted_requirements_mismatch")
+  if (!declaresQuotedResource(authorization, quote)) return fail("resource_mismatch")
   if (!chainAllowed(requirements.network, allowedChains)) return fail("unsupported_chain")
   if (!sameAtomicValue(requirements.amount, signed.value)) return fail("amount_mismatch")
   if (!sameAddress(requirements.payTo, signed.to)) return fail("wrong_recipient")
@@ -176,6 +178,12 @@ function declaredRequirements(authorization: X402PaymentAuthorization): Record<s
   return isRecord(payload?.accepted) ? payload.accepted : null
 }
 
+function declaresQuotedResource(authorization: X402PaymentAuthorization, quote: StoredQuote): boolean {
+  const payload = authorization.paymentPayload as unknown as Record<string, unknown>
+  if (payload.resource === undefined) return true
+  return isRecord(payload.resource) && payload.resource.url === quote.preparedResourceUrl
+}
+
 function quotedEntryFor(declared: Record<string, unknown>, quote: StoredQuote): QuotedRequirements | null {
   const network = firstString(declared.network)
   const asset = firstString(declared.asset)
@@ -203,6 +211,7 @@ function quotedPayload(
   const { from, to, value, validAfter, validBefore, nonce } = signed
   return {
     x402Version: quote.x402Version,
+    resource: { url: quote.preparedResourceUrl },
     accepted: requirements,
     payload: { signature, authorization: { from, to, value, validAfter, validBefore, nonce } },
   }
