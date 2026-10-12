@@ -3,7 +3,8 @@ import createCheckoutSessionWorkflow from "../../../workflows/create-checkout-se
 import { fetchSessionCart } from "../../../lib/agent-session"
 import { getPublicBaseUrl } from "../../../lib/public-url"
 import { issueUcpSessionSecret, UCP_SESSION_SECRET_HEADER } from "../../../lib/session-ownership"
-import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
+import { ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
+import { respondUcpFailure } from "../../../lib/client-errors"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const body = req.validatedBody as any
@@ -45,10 +46,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     res.set(UCP_SESSION_SECRET_HEADER, sessionSecret.secret)
     res.status(201).json(formatted)
-  } catch (error: any) {
-    res.status(500).json(ucpErrorFor(req, {
-      code: "internal_error",
-      content: error.message,
-    }))
+  } catch (error: unknown) {
+    respondUcpFailure(req, res, error)
   }
 }

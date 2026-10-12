@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { WorkflowManager } from "@medusajs/framework/orchestration"
 import "../workflows/create-checkout-session"
 import "../workflows/cancel-checkout-session"
+import "../workflows/complete-checkout-session"
 
 type FlowNode = { action?: string; next?: FlowNode | FlowNode[] }
 
@@ -33,5 +34,22 @@ describe("session state is written by the server, not into cart metadata", () =>
     expect(steps.indexOf("acquire-lock-step")).toBeGreaterThanOrEqual(0)
     expect(steps.indexOf("acquire-lock-step")).toBeLessThan(steps.indexOf("cancel-agent-session"))
     expect(steps.indexOf("cancel-agent-session")).toBeLessThan(steps.indexOf("release-lock-step"))
+  })
+})
+
+describe("a completed checkout is refused before any payment is touched", () => {
+  it("validates the checkout before it reserves or sets up a payment", () => {
+    const steps = stepsOf("complete-checkout-session")
+    expect(steps.indexOf("validate-checkout-prerequisites")).toBe(0)
+    expect(steps.indexOf("validate-checkout-prerequisites")).toBeLessThan(steps.indexOf("reserve-payment-authorization"))
+    expect(steps.indexOf("validate-checkout-prerequisites")).toBeLessThan(steps.indexOf("setup-payment"))
+  })
+})
+
+describe("an unsupported currency is refused before the cart is created", () => {
+  it("validates the currency ahead of the cart creation", () => {
+    const steps = stepsOf("create-checkout-session")
+    expect(steps.indexOf("validate-currency")).toBe(0)
+    expect(steps.indexOf("validate-currency")).toBeLessThan(steps.indexOf("create-cart-as-step"))
   })
 })

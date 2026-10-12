@@ -7,6 +7,7 @@ import { issueUcpSessionSecret, UCP_SESSION_SECRET_HEADER } from "../../../lib/s
 import { findRegionForCountry, getSupportedCountries } from "../../../lib/resolve-region"
 import { listShippingOptionsSafe } from "../../../lib/list-shipping-options"
 import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../../lib/ucp-version"
+import { respondUcpFailure } from "../../../lib/client-errors"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
@@ -97,20 +98,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     res.set(UCP_SESSION_SECRET_HEADER, sessionSecret.secret)
     res.status(201).json(session)
-  } catch (error: any) {
-    const msg: string = error?.message || ""
-    if (/Country with code .* is not within region/i.test(msg)) {
-      res.status(400).json(ucpErrorFor(req, {
-        code: "country_not_supported",
-        content: msg,
-        severity: "recoverable",
-        path: "$.shipping_address.address_country",
-      }))
-      return
-    }
-    res.status(500).json(ucpErrorFor(req, {
-      code: "internal_error",
-      content: msg || "Internal error",
-    }))
+  } catch (error: unknown) {
+    respondUcpFailure(req, res, error)
   }
 }
