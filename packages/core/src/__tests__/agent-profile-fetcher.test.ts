@@ -9,6 +9,7 @@ import {
   AGENT_PROFILE_CACHE_MAX_ENTRIES,
   AGENT_PROFILE_CACHE_TTL_MS,
   AGENT_PROFILE_MAX_IN_FLIGHT,
+  AGENT_PROFILE_TIMEOUT_MS,
   createAgentProfileFetcher,
   isPublicAddress,
 } from "../lib/agent-profile-fetcher"
@@ -229,16 +230,149 @@ describe("createAgentProfileFetcher", () => {
     expect(resolved).toHaveLength(AGENT_PROFILE_CACHE_MAX_ENTRIES + 2)
   })
 
-  it("answers busy without a request when 16 fetches are already in flight", async () => {
-    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
-    const pending = Array.from({ length: AGENT_PROFILE_MAX_IN_FLIGHT }, (_, i) => fetcher.lookup(`${base}/slow-${i}`))
-    while (hits.length < AGENT_PROFILE_MAX_IN_FLIGHT) await new Promise((r) => setTimeout(r, 5))
+  const saturate = async (fetcher: ReturnType<typeof createAgentProfileFetcher>, count: number, client?: string) => {
+    const start = hits.length
+    const pending = Array.from({ length: count }, (_, i) => fetcher.lookup(`${base}/slow-${start + i}`, client))
+    while (hits.length < start + count) await new Promise((r) => setTimeout(r, 5))
+    return pending
+  }
+
+  const releaseAll = async (pending: Promise<unknown>[]) => {
+    for (const release of hold) release()
+    await Promise.all(pending)
+  }
+
+  it("answers busy without a request when the global in-flight cap is reached", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlightPerHost: AGENT_PROFILE_MAX_IN_FLIGHT })
+    const pending = await saturate(fetcher, AGENT_PROFILE_MAX_IN_FLIGHT)
 
     expect(await fetcher.lookup(`${base}/slow-extra`)).toEqual({ status: "busy" })
     expect(hits).toHaveLength(AGENT_PROFILE_MAX_IN_FLIGHT)
 
     for (const release of hold) release()
     expect(await Promise.all(pending)).toEqual(Array(AGENT_PROFILE_MAX_IN_FLIGHT).fill({ status: "ok", version: "2026-08-25" }))
+  })
+
+  it("does not share in-flight slots between fetcher instances", async () => {
+    const attacked = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlightPerHost: AGENT_PROFILE_MAX_IN_FLIGHT })
+    const pending = await saturate(attacked, AGENT_PROFILE_MAX_IN_FLIGHT)
+
+    expect(await attacked.lookup(`${base}/profile`)).toEqual({ status: "busy" })
+    const other = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    expect(await other.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+
+    await releaseAll(pending)
+  })
+
+  it("caps in-flight fetches per host and leaves other hosts alone", async () => {
+    const lookupHost = async () => [{ address: "10.0.0.5", family: 4 }]
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlightPerHost: 2, lookupHost })
+    const pending = await saturate(fetcher, 2)
+
+    expect(await fetcher.lookup(`${base}/slow-third`)).toEqual({ status: "busy" })
+    expect(await fetcher.lookup("https://other.example/profile")).toEqual({ status: "failed" })
+    expect(hits).toHaveLength(2)
+
+    await releaseAll(pending)
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+  })
+
+  it("caps in-flight fetches per client and leaves other clients alone", async () => {
+    const fetcher = createAgentProfileFetcher({
+      allowLoopbackForTests: true,
+      maxInFlightPerHost: AGENT_PROFILE_MAX_IN_FLIGHT,
+      maxInFlightPerClient: 2,
+    })
+    const pending = await saturate(fetcher, 2, "203.0.113.7")
+
+    expect(await fetcher.lookup(`${base}/slow-third`, "203.0.113.7")).toEqual({ status: "busy" })
+    expect(await fetcher.lookup(`${base}/profile`, "198.51.100.9")).toEqual({ status: "ok", version: "2026-08-25" })
+
+    await releaseAll(pending)
+    expect(await fetcher.lookup(`${base}/profile-again`, "203.0.113.7")).toEqual({ status: "ok", version: "2026-08-25" })
+  })
+
+  it("shares one fetch between concurrent lookups of the same url", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true })
+    const pending = Array.from({ length: 12 }, () => fetcher.lookup(`${base}/slow-same`))
+    while (hits.length < 1) await new Promise((r) => setTimeout(r, 5))
+
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+    for (const release of hold) release()
+    expect(await Promise.all(pending)).toEqual(Array(12).fill({ status: "ok", version: "2026-08-25" }))
+    expect(hits.filter((h) => h.url === "/slow-same")).toHaveLength(1)
+  })
+
+  it("does not cache a busy answer", async () => {
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlight: 1 })
+    const pending = await saturate(fetcher, 1)
+
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "busy" })
+    await releaseAll(pending)
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(hits.filter((h) => h.url === "/profile")).toHaveLength(1)
+  })
+
+  it("answers busy with the last known profile for the same url", async () => {
+    let now = 1_000_000
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlight: 1, clock: () => now })
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(await fetcher.lookup(`${base}/redirect`)).toMatchObject({ status: "ok" })
+    now += AGENT_PROFILE_CACHE_TTL_MS + 1
+    const pending = await saturate(fetcher, 1)
+
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+    expect(await fetcher.lookup(`${base}/never-seen`)).toEqual({ status: "busy" })
+
+    await releaseAll(pending)
+  })
+
+  it("keeps the last known profile while failures churn through the cache", async () => {
+    let now = 1_000_000
+    const lookupHost = async () => [{ address: "10.0.0.5", family: 4 }]
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlight: 1, clock: () => now, lookupHost })
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+    for (let i = 0; i < AGENT_PROFILE_CACHE_MAX_ENTRIES + 5; i++) {
+      await fetcher.lookup(`https://garbage-${i}.example/profile`)
+    }
+    now += AGENT_PROFILE_CACHE_TTL_MS + 1
+    const pending = await saturate(fetcher, 1)
+
+    expect(await fetcher.lookup(`${base}/profile`)).toEqual({ status: "ok", version: "2026-08-25" })
+
+    await releaseAll(pending)
+  })
+
+  it("does not reuse an expired failure when busy", async () => {
+    let now = 1_000_000
+    const fetcher = createAgentProfileFetcher({ allowLoopbackForTests: true, maxInFlight: 1, clock: () => now })
+    expect(await fetcher.lookup(`${base}/big`)).toEqual({ status: "failed" })
+    now += AGENT_PROFILE_CACHE_TTL_MS + 1
+    const pending = await saturate(fetcher, 1)
+
+    expect(await fetcher.lookup(`${base}/big`)).toEqual({ status: "busy" })
+
+    await releaseAll(pending)
+  })
+
+  it("counts DNS time against the fetch deadline and frees the slot", async () => {
+    const lookupHost = () => new Promise<never>(() => undefined)
+    const fetcher = createAgentProfileFetcher({ maxInFlight: 1, lookupHost })
+    const started = Date.now()
+
+    expect(await fetcher.lookup("https://stalled.example/profile")).toEqual({ status: "failed" })
+    expect(Date.now() - started).toBeLessThan(AGENT_PROFILE_TIMEOUT_MS + 1_000)
+    expect(await fetcher.lookup("https://stalled-again.example/profile")).toEqual({ status: "failed" })
+  }, 15_000)
+
+  it("releases its slots when the fetch throws", async () => {
+    const lookupHost = async (): Promise<never> => {
+      throw new Error("dns down")
+    }
+    const fetcher = createAgentProfileFetcher({ maxInFlight: 1, maxInFlightPerHost: 1, maxInFlightPerClient: 1, lookupHost })
+
+    expect(await fetcher.lookup("https://broken.example/a", "203.0.113.7")).toEqual({ status: "failed" })
+    expect(await fetcher.lookup("https://broken.example/b", "203.0.113.7")).toEqual({ status: "failed" })
   })
 })
 

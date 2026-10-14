@@ -3,7 +3,7 @@ import middlewares from "../api/middlewares"
 import AgenticCommerceService from "../modules/agentic-commerce/service"
 import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { createUcpVersionRegistry } from "../lib/ucp-version-registry"
-import { applyUcpSessionPin, type UcpResolution } from "../lib/ucp-version-resolver"
+import { applyUcpSessionPin, resolveUcpVersion, type UcpResolution } from "../lib/ucp-version-resolver"
 import { ucpVersionFor, ucpWireFor } from "../lib/ucp-version"
 
 const registry = createUcpVersionRegistry({ ucp_version: "2026-04-08" })
@@ -61,6 +61,16 @@ describe("applyUcpSessionPin", () => {
     expect(pinned.rejection).toBeUndefined()
     expect(pinned.version).toBe("2026-08-25")
     expect(pinned.wire.version).toBe("2026-08-25")
+  })
+
+  it("serves the pinned version when a strict busy rejection meets a session pin", async () => {
+    const strict = createUcpVersionRegistry({ ucp_version: "2026-04-08", ucp_version_negotiation: "strict" })
+    const busy = await resolveUcpVersion(strict, "agent/1.0; profile=\"https://agent.example/p\"", { lookup: async () => ({ status: "busy" }) })
+    const pinned = applyUcpSessionPin(strict, busy, "2026-08-25")
+    expect(pinned).toMatchObject({ version: "2026-08-25", outcome: "busy" })
+    expect(pinned.wire.version).toBe("2026-08-25")
+    expect(pinned.rejection).toBeUndefined()
+    expect(applyUcpSessionPin(strict, busy, undefined)).toBe(busy)
   })
 
   it("ignores a pin that is not a known version", () => {
