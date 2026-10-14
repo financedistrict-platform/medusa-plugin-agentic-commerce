@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, it, expect } from "vitest"
 import type { AgentProfileFetcher, AgentProfileResult } from "../lib/agent-profile-fetcher"
 import { createUcpVersionRegistry } from "../lib/ucp-version-registry"
-import { parseUcpAgentProfile, resolveUcpVersion } from "../lib/ucp-version-resolver"
+import { isFallbackOutcome, parseUcpAgentProfile, resolveUcpVersion } from "../lib/ucp-version-resolver"
 
 const PROFILE_URL = "https://agent.example/.well-known/ucp"
 const AGENT = `agent/1.0; profile="${PROFILE_URL}"`
@@ -53,6 +53,35 @@ describe("resolveUcpVersion", () => {
     const resolution = await resolveUcpVersion(lenient, AGENT, fixtureFetcher(body))
     expect(resolution).toMatchObject({ version: "2026-04-08", outcome, host: "agent.example" })
     expect(resolution.rejection).toBeUndefined()
+  })
+
+  const busyFetcher: AgentProfileFetcher = { lookup: async () => ({ status: "busy" }) }
+
+  it("serves the current version for a busy fetcher and reports it as busy (lenient)", async () => {
+    const resolution = await resolveUcpVersion(lenient, AGENT, busyFetcher)
+    expect(resolution).toMatchObject({ version: "2026-04-08", outcome: "busy", host: "agent.example" })
+    expect(resolution.rejection).toBeUndefined()
+    expect(isFallbackOutcome("busy")).toBe(true)
+  })
+
+  it("answers 503 profile_fetch_busy with a retry hint for a busy fetcher (strict)", async () => {
+    const resolution = await resolveUcpVersion(strict, AGENT, busyFetcher)
+    expect(resolution.outcome).toBe("busy")
+    expect(resolution.rejection).toEqual({
+      status: 503,
+      code: "profile_fetch_busy",
+      content: "Agent profile could not be retrieved right now; retry shortly.",
+      retryAfterSeconds: 3,
+      pinRecoverable: true,
+    })
+  })
+
+  it("hands the client to the fetcher", async () => {
+    const clients: (string | undefined)[] = []
+    const fetcher: AgentProfileFetcher = { lookup: async (_url, client) => { clients.push(client); return { status: "failed" } } }
+    await resolveUcpVersion(lenient, AGENT, fetcher, "203.0.113.7")
+    await resolveUcpVersion(lenient, AGENT, fetcher)
+    expect(clients).toEqual(["203.0.113.7", undefined])
   })
 
   it("answers 424 profile_unreachable for an unreachable profile (strict)", async () => {

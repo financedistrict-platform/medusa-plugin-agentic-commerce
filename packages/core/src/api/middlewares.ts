@@ -173,6 +173,21 @@ async function validateUcpRequest(
 
 const agentProfileFetcher = createAgentProfileFetcher()
 
+const PIN_ENFORCED_MATCHERS = [
+  "/ucp/checkout-sessions/:id",
+  "/ucp/checkout-sessions/:id/complete",
+  "/ucp/checkout-sessions/:id/cancel",
+  "/ucp/carts/:id",
+  "/ucp/carts/:id/cancel",
+]
+
+const PIN_ENFORCED_PATHS = PIN_ENFORCED_MATCHERS.map((matcher) => new RegExp(`^${matcher.replace(/:\w+/g, "[^/]+")}/?$`))
+
+function isPinEnforcedPath(req: MedusaRequest): boolean {
+  const path = req.originalUrl.split("?")[0]
+  return PIN_ENFORCED_PATHS.some((pattern) => pattern.test(path))
+}
+
 const CAPABILITY_PATHS: [string, UcpCapability][] = [
   ["/ucp/carts", "cart"],
   ["/ucp/catalog", "catalog"],
@@ -197,6 +212,9 @@ function logUcpResolution(req: MedusaRequest, resolution: UcpResolution) {
 
 function rejectUcpResolution(req: MedusaRequest, res: MedusaResponse, resolution: UcpResolution): boolean {
   if (!resolution.rejection) return false
+  if (resolution.rejection.retryAfterSeconds !== undefined) {
+    res.set("Retry-After", String(resolution.rejection.retryAfterSeconds))
+  }
   res.status(resolution.rejection.status).json(resolution.wire.error({
     code: resolution.rejection.code,
     content: resolution.rejection.content,
@@ -213,9 +231,11 @@ async function resolveUcpVersionMiddleware(
     ucpRegistry(req),
     req.headers["ucp-agent"] as string | undefined,
     agentProfileFetcher,
+    req.ip,
   )
   logUcpResolution(req, resolution)
-  if (rejectUcpResolution(req, res, resolution)) return
+  const deferToSessionPin = resolution.rejection?.pinRecoverable === true && isPinEnforcedPath(req)
+  if (!deferToSessionPin && rejectUcpResolution(req, res, resolution)) return
 
   ;(req as UcpRequestLike).ucp = resolution
   const capability = CAPABILITY_PATHS.find(([prefix]) => req.path.startsWith(prefix))?.[1]
@@ -488,26 +508,10 @@ export default defineMiddlewares({
     },
 
     // --- UCP Session Ownership ---
-    {
-      matcher: "/ucp/checkout-sessions/:id",
+    ...PIN_ENFORCED_MATCHERS.map((matcher) => ({
+      matcher,
       middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/checkout-sessions/:id/complete",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/checkout-sessions/:id/cancel",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/carts/:id",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/carts/:id/cancel",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
+    })),
 
     {
       matcher: "/ucp/orders/:id",

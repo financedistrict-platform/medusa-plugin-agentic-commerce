@@ -3,16 +3,20 @@ import type { UcpVersionRegistry } from "./ucp-version-registry"
 import type { ResolvedUcp, UcpProfileOutcome } from "./ucp-version"
 
 export type UcpResolutionRejection = {
-  status: 422 | 424
+  status: 422 | 424 | 503
   code: string
   content: string
+  retryAfterSeconds?: number
+  pinRecoverable?: boolean
 }
+
+const BUSY_RETRY_AFTER_SECONDS = 3
 
 export type UcpResolution = ResolvedUcp & {
   rejection?: UcpResolutionRejection
 }
 
-const FALLBACK_OUTCOMES: readonly UcpProfileOutcome[] = ["undeclared", "unreachable"]
+const FALLBACK_OUTCOMES: readonly UcpProfileOutcome[] = ["undeclared", "unreachable", "busy"]
 
 export function isFallbackOutcome(outcome: UcpProfileOutcome): boolean {
   return FALLBACK_OUTCOMES.includes(outcome)
@@ -64,12 +68,13 @@ export async function resolveUcpVersion(
   registry: UcpVersionRegistry,
   agentHeader: string | undefined,
   fetcher: AgentProfileFetcher,
+  client?: string,
 ): Promise<UcpResolution> {
   const url = parseUcpAgentProfile(agentHeader)
   if (!url) return served(registry, registry.current, "none")
 
   const host = hostOf(url)
-  const profile = await fetcher.lookup(url)
+  const profile = await fetcher.lookup(url, client)
   const declared = profile.status === "ok" && profile.version ? profile.version : undefined
 
   let outcome: UcpProfileOutcome
@@ -89,8 +94,10 @@ export async function resolveUcpVersion(
           : `Agent profile URL redirects to ${profile.location}; use the final URL.`,
       }, undefined, host, profile.location ?? undefined)
     case "failed":
-    case "busy":
       outcome = "unreachable"
+      break
+    case "busy":
+      outcome = "busy"
       break
     default: {
       const unhandled: never = profile
@@ -105,6 +112,16 @@ export async function resolveUcpVersion(
       status: 422,
       code: "version_unsupported",
       content: unsupportedVersionMessage(registry, declared!),
+    }, declared, host)
+  }
+
+  if (outcome === "busy" && registry.negotiation === "strict") {
+    return rejected(registry, outcome, {
+      status: 503,
+      code: "profile_fetch_busy",
+      content: "Agent profile could not be retrieved right now; retry shortly.",
+      retryAfterSeconds: BUSY_RETRY_AFTER_SECONDS,
+      pinRecoverable: true,
     }, declared, host)
   }
 
@@ -123,8 +140,14 @@ export function applyUcpSessionPin(
   resolution: UcpResolution,
   pinned: unknown,
 ): UcpResolution {
-  if (resolution.rejection) return resolution
   if (typeof pinned !== "string" || !registry.isKnown(pinned)) return resolution
+
+  if (resolution.rejection) {
+    if (!resolution.rejection.pinRecoverable) return resolution
+    const recovered: UcpResolution = { ...resolution, version: pinned, wire: registry.wire(pinned) }
+    delete recovered.rejection
+    return recovered
+  }
 
   if (resolution.outcome === "matched") {
     if (resolution.declared === pinned) return resolution
