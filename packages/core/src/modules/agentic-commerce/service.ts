@@ -16,7 +16,7 @@ import crypto from "crypto"
 import { PaymentHandlerRegistry } from "../../lib/payment-handler-registry"
 import type { PaymentHandlerAdapter } from "../../types/payment-handler-adapter"
 import type { FormatterContext } from "../../lib/formatters/types"
-import { validateWebhookUrl } from "../../lib/validate-webhook-url"
+import { createWebhookDelivery, type WebhookDelivery } from "../../lib/webhook-delivery"
 import { resolvePaymentProviderId } from "../../lib/payment-provider-config"
 import * as ucpFormatter from "../../lib/formatters/ucp"
 import * as acpFormatter from "../../lib/formatters/acp"
@@ -62,6 +62,7 @@ export default class AgenticCommerceService {
   private acpVersion: string
   private paymentHandlerRegistry: PaymentHandlerRegistry
   private ctx: FormatterContext
+  protected webhookDelivery: WebhookDelivery = createWebhookDelivery()
 
   private ucpEnabled = true
   private acpEnabled = true
@@ -83,6 +84,10 @@ export default class AgenticCommerceService {
     this.ucpRegistry = createUcpVersionRegistry(options)
     this.ucpVersion = this.ucpRegistry.current
     this.acpVersion = options.acp_version || "2026-01-30"
+
+    if (!this.signatureKey) {
+      console.warn("[agentic-commerce] signatureKey is not set in the plugin options or AGENTIC_COMMERCE_SIGNATURE_KEY. Outbound webhook signatures can be computed by anyone and inbound Signature headers are rejected until a key is set.")
+    }
 
     if (!options.ucp_version) {
       console.info(`[agentic-commerce] ucp_version not set, serving the latest UCP version ${this.ucpVersion}. Set ucp_version to pin another.`)
@@ -151,6 +156,7 @@ export default class AgenticCommerceService {
   }
 
   verifySignature(payload: string, signature: string): boolean {
+    if (!this.signatureKey) return false
     const expected = this.signPayload(payload)
     try {
       return crypto.timingSafeEqual(
@@ -277,10 +283,9 @@ export default class AgenticCommerceService {
     payload: Record<string, unknown>
     maxRetries?: number
   }): Promise<{ status: number; success: boolean }> {
-    // SSRF protection — validate URL before fetching
-    const urlCheck = await validateWebhookUrl(params.url)
-    if (!urlCheck.valid) {
-      console.warn(`[agentic-commerce] Blocked webhook to unsafe URL: ${urlCheck.reason}`)
+    const resolved = await this.webhookDelivery.resolve(params.url)
+    if (!resolved.valid) {
+      console.warn(`[agentic-commerce] Blocked webhook to unsafe URL: ${resolved.reason}`)
       return { status: 0, success: false }
     }
 
@@ -298,26 +303,16 @@ export default class AgenticCommerceService {
       if (attempt > 0) {
         await new Promise((r) => setTimeout(r, delays[attempt] || 10000))
       }
-      try {
-        const response = await fetch(params.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Merchant-Signature": signature,
-            "Timestamp": timestamp,
-          },
-          body,
-          signal: AbortSignal.timeout(10_000), // 10s timeout per attempt
-        })
-        if (response.ok) {
-          return { status: response.status, success: true }
-        }
-        // Client error — don't retry
-        if (response.status >= 400 && response.status < 500) {
-          return { status: response.status, success: false }
-        }
-      } catch {
-        // Network error or timeout — retry
+      const status = await this.webhookDelivery.post(resolved.target, body, {
+        "Content-Type": "application/json",
+        "Merchant-Signature": signature,
+        "Timestamp": timestamp,
+      })
+      if (status >= 200 && status < 300) {
+        return { status, success: true }
+      }
+      if (status >= 300 && status < 500) {
+        return { status, success: false }
       }
     }
     return { status: 0, success: false }
