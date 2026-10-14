@@ -317,7 +317,7 @@ import {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_key` | `string` | `""` | API key for ACP Bearer token authentication |
-| `signatureKey` | `string` | `""` | HMAC-SHA256 key for request signing |
+| `signatureKey` | `string` | `""` | HMAC-SHA256 key for request signing. Set it in production: with no key, outbound webhook signatures can be computed by anyone and inbound `Signature` headers are rejected |
 | `storefront_url` | `string` | `"http://localhost:8000"` | Public URL of your storefront |
 | `store_name` | `string` | `"My Store"` | Store name in protocol responses |
 | `store_description` | `string` | `""` | Store description for discovery |
