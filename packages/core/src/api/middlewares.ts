@@ -270,10 +270,6 @@ async function enforceSessionVersionPin(
   next()
 }
 
-// --- Session Ownership Middleware ---
-// Verifies that the caller's fingerprint matches the session creator's fingerprint.
-// Prevents agent A from modifying agent B's checkout session.
-
 function ownershipRejecter(protocol: SessionProtocol, req: MedusaRequest, res: MedusaResponse) {
   return (status: number, code: string, message: string) => {
     if (protocol === "acp") {
@@ -289,7 +285,8 @@ function ownershipRejecter(protocol: SessionProtocol, req: MedusaRequest, res: M
   }
 }
 
-function verifySessionOwner(protocol: SessionProtocol) {
+function verifySessionOwner(protocol: SessionProtocol, notFoundCode = "not_found") {
+  const notFoundMessage = notFoundCode === "cart_not_found" ? "Cart not found" : "Checkout session not found"
   return async function sessionOwnerGuard(
     req: MedusaRequest,
     res: MedusaResponse,
@@ -302,6 +299,11 @@ function verifySessionOwner(protocol: SessionProtocol) {
     }
 
     const reject = ownershipRejecter(protocol, req, res)
+    const fingerprint = computeSessionFingerprint(protocol, req.headers)
+    if (protocol === "ucp" && !fingerprint) {
+      reject(401, "session_secret_required", "Send the UCP-Session-Secret header returned when this cart or checkout session was created")
+      return
+    }
 
     let session
     try {
@@ -312,12 +314,16 @@ function verifySessionOwner(protocol: SessionProtocol) {
     }
 
     if (!session) {
-      reject(404, "not_found", "Checkout session not found")
+      reject(404, notFoundCode, notFoundMessage)
       return
     }
 
-    if (!verifySessionOwnership(session, computeSessionFingerprint(protocol, req.headers))) {
-      reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
+    if (!verifySessionOwnership(session, fingerprint)) {
+      if (protocol === "ucp") {
+        reject(404, notFoundCode, notFoundMessage)
+      } else {
+        reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
+      }
       return
     }
 
@@ -333,12 +339,17 @@ function verifyOrderOwner(protocol: SessionProtocol) {
   ) {
     const reject = ownershipRejecter(protocol, req, res)
     const { id } = req.params
+    const fingerprint = computeSessionFingerprint(protocol, req.headers)
+    if (protocol === "ucp" && !fingerprint) {
+      reject(401, "session_secret_required", "Send the UCP-Session-Secret header returned when the checkout session was created")
+      return
+    }
 
     let owned = false
     try {
       if (id) {
         const session = await findSessionOfOrder(req.scope, id)
-        owned = verifySessionOwnership(session, computeSessionFingerprint(protocol, req.headers))
+        owned = verifySessionOwnership(session, fingerprint)
       }
     } catch {
       reject(500, "internal_error", "The order could not be verified")
@@ -346,7 +357,7 @@ function verifyOrderOwner(protocol: SessionProtocol) {
     }
 
     if (!owned) {
-      reject(404, "not_found", "Order not found")
+      reject(404, protocol === "ucp" ? "order_not_found" : "not_found", "Order not found")
       return
     }
 
@@ -510,7 +521,7 @@ export default defineMiddlewares({
     // --- UCP Session Ownership ---
     ...PIN_ENFORCED_MATCHERS.map((matcher) => ({
       matcher,
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
+      middlewares: [verifySessionOwner("ucp", matcher.startsWith("/ucp/carts") ? "cart_not_found" : "checkout_not_found"), enforceSessionVersionPin],
     })),
 
     {
