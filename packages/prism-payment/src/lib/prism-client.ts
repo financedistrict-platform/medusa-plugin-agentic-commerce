@@ -1,3 +1,5 @@
+import type { PrismSettlementSummary } from "../modules/prism-payment/types"
+
 export type PreparePaymentInput = {
   amount: string
   currency: string
@@ -155,6 +157,13 @@ export class PrismClient {
     return this.get<AcpHandler[]>("/api/v2/merchant/acp/handlers")
   }
 
+  async fetchSettlementSummary(txHash: string): Promise<PrismSettlementSummary> {
+    return this.get<PrismSettlementSummary>(
+      `/api/v2/merchant/payments/${encodeURIComponent(txHash)}/settlement`,
+      5000,
+    )
+  }
+
   async verifyPayment(request: PrismPaymentRequest): Promise<Record<string, unknown>> {
     return this.post<Record<string, unknown>>(this.paymentPath(request, "verify"), request)
   }
@@ -181,10 +190,11 @@ export class PrismClient {
     }
   }
 
-  private async get<T>(path: string): Promise<T> {
+  private async get<T>(path: string, timeoutMs?: number): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "GET",
       headers: { "X-API-Key": this.apiKey },
+      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     })
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error")

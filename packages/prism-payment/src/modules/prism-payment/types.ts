@@ -94,6 +94,17 @@ export type PrismSettleResponse = {
   settled?: SettledPayment
 }
 
+export interface PrismSettlementSummary {
+  transaction: string
+  network: string
+  asset: string
+  status: string
+  gross: string
+  fee: string
+  cashback: string
+  net: string
+}
+
 export type SettledPayment = {
   transaction: string
   network: string
