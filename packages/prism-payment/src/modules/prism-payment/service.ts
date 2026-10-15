@@ -61,10 +61,14 @@ function settledPaymentData(settled: SettledPayment) {
 
 function manualRefundMessage(summary: PrismSettlementSummary | null): string {
   const base = "Prism payments settle on-chain and cannot be refunded automatically."
+  const unavailable = `${base} The settlement summary is unavailable. Check the net amount received in the Prism portal before refunding the buyer manually.`
   if (summary?.status !== "confirmed") {
-    return `${base} The settlement summary is unavailable. Check the net amount received in the Prism portal before refunding the buyer manually.`
+    return unavailable
   }
   const { net, asset, cashback, fee } = summary
+  if (![net, asset, cashback, fee].every((value) => typeof value === "string" && value !== "")) {
+    return unavailable
+  }
   return `${base} Received ${net} ${asset} net (${cashback} ${asset} cashback already paid to the buyer, ${fee} ${asset} fees). Refund the buyer manually, up to ${net} ${asset}.`
 }
 

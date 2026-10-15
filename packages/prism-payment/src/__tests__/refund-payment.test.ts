@@ -69,6 +69,21 @@ describe("refundPayment", () => {
     ).rejects.toMatchObject({ message: expect.stringContaining("unavailable") })
   })
 
+  it("says the summary is unavailable when a confirmed summary has no net amount", async () => {
+    const { provider, client } = makeProvider()
+    const { net: _net, ...withoutNet } = confirmed
+    client.fetchSettlementSummary.mockResolvedValue(withoutNet)
+
+    await expect(
+      provider.refundPayment({ amount: 100, data: { prism_tx_id: "0xabc" } } as any),
+    ).rejects.toMatchObject({
+      message: expect.not.stringContaining("undefined"),
+    })
+    await expect(
+      provider.refundPayment({ amount: 100, data: { prism_tx_id: "0xabc" } } as any),
+    ).rejects.toMatchObject({ message: expect.stringContaining("unavailable") })
+  })
+
   it("does not call Prism when the payment has no transaction hash", async () => {
     const { provider, client } = makeProvider()
 
