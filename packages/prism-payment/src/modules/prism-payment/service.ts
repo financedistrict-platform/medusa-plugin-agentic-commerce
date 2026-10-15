@@ -1,4 +1,4 @@
-import { AbstractPaymentProvider } from "@medusajs/framework/utils"
+import { AbstractPaymentProvider, MedusaError } from "@medusajs/framework/utils"
 import type {
   InitiatePaymentInput,
   InitiatePaymentOutput,
@@ -25,6 +25,7 @@ import type {
   PrismPaymentConfig,
   X402PaymentAuthorization,
   PrismSettleResponse,
+  PrismSettlementSummary,
   PrismVerifyResponse,
   SettledPayment,
 } from "./types"
@@ -56,6 +57,15 @@ function settledPaymentData(settled: SettledPayment) {
     settled_amount: settled.amount,
     settled_asset: settled.asset,
   }
+}
+
+function manualRefundMessage(summary: PrismSettlementSummary | null): string {
+  const base = "Prism payments settle on-chain and cannot be refunded automatically."
+  if (summary?.status !== "confirmed") {
+    return `${base} The settlement summary is unavailable. Check the net amount received in the Prism portal before refunding the buyer manually.`
+  }
+  const { net, asset, cashback, fee } = summary
+  return `${base} Received ${net} ${asset} net (${cashback} ${asset} cashback already paid to the buyer, ${fee} ${asset} fees). Refund the buyer manually, up to ${net} ${asset}.`
 }
 
 function unreconciledTransaction(settleResult: PrismSettleResponse) {
@@ -322,15 +332,10 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   }
 
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
-    console.warn("[prism-payment] Refund not yet implemented — manual processing required")
-    return {
-      data: {
-        ...((input.data || {}) as Record<string, unknown>),
-        refund_requested: true,
-        refund_amount: String(input.amount),
-        refund_status: "pending_manual",
-      },
-    }
+    const data = (input.data ?? {}) as Record<string, unknown>
+    const txHash = String(data.prism_tx_id ?? data.transaction_reference ?? "")
+    const summary = txHash ? await this.client.fetchSettlementSummary(txHash).catch(() => null) : null
+    throw new MedusaError(MedusaError.Types.NOT_ALLOWED, manualRefundMessage(summary))
   }
 
   async deletePayment(_input: DeletePaymentInput): Promise<DeletePaymentOutput> {

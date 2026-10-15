@@ -81,6 +81,17 @@ export type PrismSettleRequest = {
  * `errorCode`. The provider's `settleWithPrism` parser accepts both shapes so a
  * future Prism rename can't silently re-break us.
  */
+export interface PrismSettlementSummary {
+  transaction: string
+  network: string
+  asset: string
+  status: string
+  gross: string
+  fee: string
+  cashback: string
+  net: string
+}
+
 export type PrismSettleResponse = {
   success: boolean
   payer?: string
