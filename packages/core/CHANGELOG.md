@@ -1,5 +1,17 @@
 # @financedistrict/medusa-plugin-agentic-commerce
 
+## 1.1.5
+
+### Patch Changes
+
+- [#69](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/69) [`c05f19e`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/c05f19ea6f8776b776c81131a1ab2387e54d4051) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Stop one caller from starving agent profile fetches for everyone. The in-flight limit is now kept per fetcher instead of per process, with extra limits per host and per client ip, one shared fetch for concurrent lookups of the same url, and DNS time counted inside the 3 s fetch deadline. A busy fetcher now answers with the last known profile of that url, and is reported as `busy` instead of `unreachable`. Under strict negotiation a busy fetcher answers `503 profile_fetch_busy` with `Retry-After`, and a cart or checkout session that already has a version keeps working in that version.
+
+- [#69](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/69) [`c05f19e`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/c05f19ea6f8776b776c81131a1ab2387e54d4051) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - UCP carts, checkout sessions and orders answer `401 session_secret_required` when the `UCP-Session-Secret` header is missing, before anything is read, and `404 cart_not_found`, `checkout_not_found` or `order_not_found` when the secret is wrong or the id is unknown. This replaces `403 session_ownership_mismatch` and the generic `404 not_found` on UCP routes, so every Finance District store plugin answers the same way. ACP routes are unchanged.
+
+- [#69](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/69) [`c05f19e`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/c05f19ea6f8776b776c81131a1ab2387e54d4051) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Agent webhooks are now delivered only to the address that passed the URL check. The host is resolved once and every attempt connects to that address, a redirect is never followed (a 3xx is a failed delivery and is not retried), and IPv4-mapped IPv6 addresses such as `[::ffff:127.0.0.1]` are rejected like the IPv4 address they carry.
+
+  With no `signatureKey` the store now logs a warning at startup and rejects inbound `Signature` headers instead of verifying them against an empty key. Set `signatureKey` or `AGENTIC_COMMERCE_SIGNATURE_KEY` to sign outbound webhooks with a secret.
+
 ## 1.1.4
 
 ### Patch Changes

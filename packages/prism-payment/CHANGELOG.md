@@ -1,5 +1,11 @@
 # @financedistrict/medusa-plugin-prism-payment
 
+## 1.1.6
+
+### Patch Changes
+
+- [#69](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/69) [`c05f19e`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/c05f19ea6f8776b776c81131a1ab2387e54d4051) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Refunds now fail with the net amount to refund by hand, instead of recording a refund that never happened.
+
 ## 1.1.5
 
 ### Patch Changes
