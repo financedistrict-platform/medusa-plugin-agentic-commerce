@@ -173,6 +173,21 @@ async function validateUcpRequest(
 
 const agentProfileFetcher = createAgentProfileFetcher()
 
+const PIN_ENFORCED_MATCHERS = [
+  "/ucp/checkout-sessions/:id",
+  "/ucp/checkout-sessions/:id/complete",
+  "/ucp/checkout-sessions/:id/cancel",
+  "/ucp/carts/:id",
+  "/ucp/carts/:id/cancel",
+]
+
+const PIN_ENFORCED_PATHS = PIN_ENFORCED_MATCHERS.map((matcher) => new RegExp(`^${matcher.replace(/:\w+/g, "[^/]+")}/?$`))
+
+function isPinEnforcedPath(req: MedusaRequest): boolean {
+  const path = req.originalUrl.split("?")[0]
+  return PIN_ENFORCED_PATHS.some((pattern) => pattern.test(path))
+}
+
 const CAPABILITY_PATHS: [string, UcpCapability][] = [
   ["/ucp/carts", "cart"],
   ["/ucp/catalog", "catalog"],
@@ -197,6 +212,9 @@ function logUcpResolution(req: MedusaRequest, resolution: UcpResolution) {
 
 function rejectUcpResolution(req: MedusaRequest, res: MedusaResponse, resolution: UcpResolution): boolean {
   if (!resolution.rejection) return false
+  if (resolution.rejection.retryAfterSeconds !== undefined) {
+    res.set("Retry-After", String(resolution.rejection.retryAfterSeconds))
+  }
   res.status(resolution.rejection.status).json(resolution.wire.error({
     code: resolution.rejection.code,
     content: resolution.rejection.content,
@@ -213,9 +231,11 @@ async function resolveUcpVersionMiddleware(
     ucpRegistry(req),
     req.headers["ucp-agent"] as string | undefined,
     agentProfileFetcher,
+    req.ip,
   )
   logUcpResolution(req, resolution)
-  if (rejectUcpResolution(req, res, resolution)) return
+  const deferToSessionPin = resolution.rejection?.pinRecoverable === true && isPinEnforcedPath(req)
+  if (!deferToSessionPin && rejectUcpResolution(req, res, resolution)) return
 
   ;(req as UcpRequestLike).ucp = resolution
   const capability = CAPABILITY_PATHS.find(([prefix]) => req.path.startsWith(prefix))?.[1]
@@ -250,10 +270,6 @@ async function enforceSessionVersionPin(
   next()
 }
 
-// --- Session Ownership Middleware ---
-// Verifies that the caller's fingerprint matches the session creator's fingerprint.
-// Prevents agent A from modifying agent B's checkout session.
-
 function ownershipRejecter(protocol: SessionProtocol, req: MedusaRequest, res: MedusaResponse) {
   return (status: number, code: string, message: string) => {
     if (protocol === "acp") {
@@ -269,7 +285,8 @@ function ownershipRejecter(protocol: SessionProtocol, req: MedusaRequest, res: M
   }
 }
 
-function verifySessionOwner(protocol: SessionProtocol) {
+function verifySessionOwner(protocol: SessionProtocol, notFoundCode = "not_found") {
+  const notFoundMessage = notFoundCode === "cart_not_found" ? "Cart not found" : "Checkout session not found"
   return async function sessionOwnerGuard(
     req: MedusaRequest,
     res: MedusaResponse,
@@ -282,6 +299,11 @@ function verifySessionOwner(protocol: SessionProtocol) {
     }
 
     const reject = ownershipRejecter(protocol, req, res)
+    const fingerprint = computeSessionFingerprint(protocol, req.headers)
+    if (protocol === "ucp" && !fingerprint) {
+      reject(401, "session_secret_required", "Send the UCP-Session-Secret header returned when this cart or checkout session was created")
+      return
+    }
 
     let session
     try {
@@ -292,12 +314,16 @@ function verifySessionOwner(protocol: SessionProtocol) {
     }
 
     if (!session) {
-      reject(404, "not_found", "Checkout session not found")
+      reject(404, notFoundCode, notFoundMessage)
       return
     }
 
-    if (!verifySessionOwnership(session, computeSessionFingerprint(protocol, req.headers))) {
-      reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
+    if (!verifySessionOwnership(session, fingerprint)) {
+      if (protocol === "ucp") {
+        reject(404, notFoundCode, notFoundMessage)
+      } else {
+        reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
+      }
       return
     }
 
@@ -313,12 +339,17 @@ function verifyOrderOwner(protocol: SessionProtocol) {
   ) {
     const reject = ownershipRejecter(protocol, req, res)
     const { id } = req.params
+    const fingerprint = computeSessionFingerprint(protocol, req.headers)
+    if (protocol === "ucp" && !fingerprint) {
+      reject(401, "session_secret_required", "Send the UCP-Session-Secret header returned when the checkout session was created")
+      return
+    }
 
     let owned = false
     try {
       if (id) {
         const session = await findSessionOfOrder(req.scope, id)
-        owned = verifySessionOwnership(session, computeSessionFingerprint(protocol, req.headers))
+        owned = verifySessionOwnership(session, fingerprint)
       }
     } catch {
       reject(500, "internal_error", "The order could not be verified")
@@ -326,7 +357,7 @@ function verifyOrderOwner(protocol: SessionProtocol) {
     }
 
     if (!owned) {
-      reject(404, "not_found", "Order not found")
+      reject(404, protocol === "ucp" ? "order_not_found" : "not_found", "Order not found")
       return
     }
 
@@ -488,26 +519,10 @@ export default defineMiddlewares({
     },
 
     // --- UCP Session Ownership ---
-    {
-      matcher: "/ucp/checkout-sessions/:id",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/checkout-sessions/:id/complete",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/checkout-sessions/:id/cancel",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/carts/:id",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
-    {
-      matcher: "/ucp/carts/:id/cancel",
-      middlewares: [verifySessionOwner("ucp"), enforceSessionVersionPin],
-    },
+    ...PIN_ENFORCED_MATCHERS.map((matcher) => ({
+      matcher,
+      middlewares: [verifySessionOwner("ucp", matcher.startsWith("/ucp/carts") ? "cart_not_found" : "checkout_not_found"), enforceSessionVersionPin],
+    })),
 
     {
       matcher: "/ucp/orders/:id",

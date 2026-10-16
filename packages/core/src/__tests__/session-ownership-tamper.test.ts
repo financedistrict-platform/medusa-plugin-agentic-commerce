@@ -22,6 +22,9 @@ const buyerA = { "ucp-agent": PLATFORM_AGENT }
 
 type Headers = Record<string, string>
 
+const codeOf = (res: any) => res.body?.messages?.[0]?.code ?? res.body?.code
+const notFoundFor = (matcher: string) => (matcher.startsWith("/ucp/carts") ? "cart_not_found" : "checkout_not_found")
+
 function createUcp(headers: Headers = buyerA) {
   const { service } = createStoreService({ version: "2026-04-08" })
   ;(service as any).getPaymentHandlerService = () => ({ prepareCheckoutPayment: vi.fn().mockResolvedValue({}) })
@@ -47,9 +50,9 @@ async function issue() {
   return { fingerprint: storedFingerprint(), secret: res.headers[SECRET_HEADER] as string }
 }
 
-function ownerRun(matcher: string, headers: Headers, stored: string | null, path: string) {
+function ownerRun(matcher: string, headers: Headers, stored: string | null, path: string, store?: unknown) {
   const route = findRoute(matcher)
-  const sessions = fakeAgentSessions(stored === null ? [] : [{ cart_id: "cart_1", session_fingerprint: stored }])
+  const sessions = store ?? fakeAgentSessions(stored === null ? [] : [{ cart_id: "cart_1", session_fingerprint: stored }])
   const { service } = createStoreService({ version: "2026-04-08" })
   const req = {
     ...createRequest({ agenticCommerce: service, agenticCommerceSession: sessions }, { id: "cart_1" }),
@@ -120,33 +123,51 @@ describe.each(ucpSessionRoutes)("UCP session ownership on %s", (matcher, path) =
     const { fingerprint } = await issue()
     const { passed, res } = await ownerRun(matcher, buyerA, fingerprint, path)
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(401)
+    expect(codeOf(res)).toBe("session_secret_required")
   })
 
   it("rejects a wrong secret", async () => {
     const { fingerprint } = await issue()
     const { passed, res } = await ownerRun(matcher, { ...buyerA, [SECRET_HEADER]: "not-the-secret" }, fingerprint, path)
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(404)
+    expect(codeOf(res)).toBe(notFoundFor(matcher))
   })
 
   it("rejects a valid store API key presented without the secret", async () => {
     const { fingerprint } = await issue()
     const { passed, res } = await ownerRun(matcher, { ...buyerA, authorization: "Bearer any-key" }, fingerprint, path)
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(401)
+    expect(codeOf(res)).toBe("session_secret_required")
   })
 
   it("rejects a request without credentials even when the stored fingerprint is the anonymous marker", async () => {
     const { passed, res } = await ownerRun(matcher, {}, "anonymous", path)
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(401)
   })
 
   it("rejects a session whose stored fingerprint is empty", async () => {
-    const { passed, res } = await ownerRun(matcher, buyerA, "", path)
+    const { passed, res } = await ownerRun(matcher, { ...buyerA, [SECRET_HEADER]: "any-secret" }, "", path)
     expect(passed).toBe(false)
-    expect(res.statusCode).toBeGreaterThanOrEqual(400)
+    expect(res.statusCode).toBe(404)
+    expect(codeOf(res)).toBe(notFoundFor(matcher))
+  })
+
+  it("answers the same 404 for an id that does not exist", async () => {
+    const { passed, res } = await ownerRun(matcher, { ...buyerA, [SECRET_HEADER]: "any-secret" }, null, path)
+    expect(passed).toBe(false)
+    expect(res.statusCode).toBe(404)
+    expect(codeOf(res)).toBe(notFoundFor(matcher))
+  })
+
+  it("refuses a missing secret before reading the session store", async () => {
+    const broken = { find: async () => { throw new Error("db down") } }
+    const { passed, res } = await ownerRun(matcher, buyerA, null, path, broken)
+    expect(passed).toBe(false)
+    expect(res.statusCode).toBe(401)
   })
 })
 
@@ -213,36 +234,40 @@ describe("UCP order reads", () => {
     expect(passed).toBe(true)
   })
 
-  it("answers 404 to another buyer of the same agent platform", async () => {
+  it("answers 401 to a buyer without the secret", async () => {
     const { passed, res } = await orderRun(matcher, buyerA, ownerFingerprint("secret-a"))
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(404)
+    expect(res.statusCode).toBe(401)
+    expect(codeOf(res)).toBe("session_secret_required")
   })
 
   it("answers 404 to a wrong secret", async () => {
     const { passed, res } = await orderRun(matcher, withSecret("secret-b"), ownerFingerprint("secret-a"))
     expect(passed).toBe(false)
     expect(res.statusCode).toBe(404)
+    expect(codeOf(res)).toBe("order_not_found")
   })
 
   it("answers the same 404 for an order id that does not exist", async () => {
     const { passed, res } = await orderRun(matcher, withSecret("secret-a"), ownerFingerprint("secret-a"), "order_missing")
     expect(passed).toBe(false)
     expect(res.statusCode).toBe(404)
+    expect(codeOf(res)).toBe("order_not_found")
   })
 
   it.each(["order_unlinked", "order_orphan"])("answers 404 for %s, which no agent session placed", async (id) => {
     const { passed, res } = await orderRun(matcher, withSecret("secret-a"), ownerFingerprint("secret-a"), id)
     expect(passed).toBe(false)
     expect(res.statusCode).toBe(404)
+    expect(codeOf(res)).toBe("order_not_found")
   })
 
   it("keeps the UCP error envelope and the secret check when the path is written in another letter case", async () => {
     const wrongKey = await orderRun(matcher, { ...buyerA, authorization: "Bearer key-a" }, ownerFingerprint("secret-a"), "order_1", undefined, "/UCP/orders/order_1")
     const right = await orderRun(matcher, withSecret("secret-a"), ownerFingerprint("secret-a"), "order_1", undefined, "/UCP/orders/order_1")
     expect(wrongKey.passed).toBe(false)
-    expect(wrongKey.res.statusCode).toBe(404)
-    expect((wrongKey.res.body as any).messages?.[0]?.code ?? (wrongKey.res.body as any).code).toBe("not_found")
+    expect(wrongKey.res.statusCode).toBe(401)
+    expect(codeOf(wrongKey.res)).toBe("session_secret_required")
     expect(right.passed).toBe(true)
   })
 

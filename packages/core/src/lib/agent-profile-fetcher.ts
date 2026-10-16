@@ -7,6 +7,8 @@ import { readPackageVersion } from "./package-version"
 export const AGENT_PROFILE_CACHE_TTL_MS = 600_000
 export const AGENT_PROFILE_CACHE_MAX_ENTRIES = 1000
 export const AGENT_PROFILE_MAX_IN_FLIGHT = 16
+export const AGENT_PROFILE_MAX_IN_FLIGHT_PER_HOST = 4
+export const AGENT_PROFILE_MAX_IN_FLIGHT_PER_CLIENT = 8
 export const AGENT_PROFILE_MAX_BYTES = 131_072
 export const AGENT_PROFILE_TIMEOUT_MS = 3_000
 export const AGENT_PROFILE_MAX_LOCATION_LENGTH = 512
@@ -32,10 +34,13 @@ export type AgentProfileFetcherOptions = {
   allowLoopbackForTests?: boolean
   lookupHost?: (host: string) => Promise<ResolvedAddress[]>
   clock?: () => number
+  maxInFlight?: number
+  maxInFlightPerHost?: number
+  maxInFlightPerClient?: number
 }
 
 export type AgentProfileFetcher = {
-  lookup(url: string): Promise<AgentProfileResult>
+  lookup(url: string, client?: string): Promise<AgentProfileResult>
 }
 
 type CacheEntry = { result: AgentProfileResult; expiresAt: number }
@@ -64,7 +69,40 @@ export function isPublicAddress(address: string): boolean {
   return !blocked.check(address, "ipv6")
 }
 
-let inFlight = 0
+function hostKey(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase()
+  } catch {
+    return ""
+  }
+}
+
+function adjust(counts: Map<string, number>, key: string, delta: number) {
+  const next = (counts.get(key) ?? 0) + delta
+  if (next <= 0) counts.delete(key)
+  else counts.set(key, next)
+}
+
+function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (timeoutMs <= 0) {
+      work.catch(() => undefined)
+      reject(new Error("deadline exceeded"))
+      return
+    }
+    const timer = setTimeout(() => reject(new Error("deadline exceeded")), timeoutMs)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
 
 async function defaultLookupHost(host: string): Promise<ResolvedAddress[]> {
   return dns.lookup(host, { all: true })
@@ -74,42 +112,76 @@ export function createAgentProfileFetcher(options: AgentProfileFetcherOptions = 
   const allowLoopback = options.allowLoopbackForTests === true
   const lookupHost = options.lookupHost ?? defaultLookupHost
   const clock = options.clock ?? Date.now
-  const cache = new Map<string, CacheEntry>()
+  const maxInFlight = options.maxInFlight ?? AGENT_PROFILE_MAX_IN_FLIGHT
+  const maxPerHost = options.maxInFlightPerHost ?? AGENT_PROFILE_MAX_IN_FLIGHT_PER_HOST
+  const maxPerClient = options.maxInFlightPerClient ?? AGENT_PROFILE_MAX_IN_FLIGHT_PER_CLIENT
+  const profiles = new Map<string, CacheEntry>()
+  const misses = new Map<string, CacheEntry>()
+  const pending = new Map<string, Promise<AgentProfileResult>>()
+  const perHost = new Map<string, number>()
+  const perClient = new Map<string, number>()
+  let inFlight = 0
 
   const remember = (url: string, result: AgentProfileResult) => {
-    cache.delete(url)
-    if (cache.size >= AGENT_PROFILE_CACHE_MAX_ENTRIES) {
-      const oldest = cache.keys().next().value
-      if (oldest !== undefined) cache.delete(oldest)
+    const store = result.status === "ok" ? profiles : misses
+    profiles.delete(url)
+    misses.delete(url)
+    if (store.size >= AGENT_PROFILE_CACHE_MAX_ENTRIES) {
+      const oldest = store.keys().next().value
+      if (oldest !== undefined) store.delete(oldest)
     }
-    cache.set(url, { result, expiresAt: clock() + AGENT_PROFILE_CACHE_TTL_MS })
+    store.set(url, { result, expiresAt: clock() + AGENT_PROFILE_CACHE_TTL_MS })
     return result
   }
 
   const cached = (url: string): AgentProfileResult | undefined => {
-    const entry = cache.get(url)
-    if (!entry) return undefined
-    if (entry.expiresAt <= clock()) {
-      cache.delete(url)
-      return undefined
-    }
-    cache.delete(url)
-    cache.set(url, entry)
+    const store = profiles.has(url) ? profiles : misses
+    const entry = store.get(url)
+    if (!entry || entry.expiresAt <= clock()) return undefined
+    store.delete(url)
+    store.set(url, entry)
     return entry.result
   }
 
+  const lastKnown = (url: string): AgentProfileResult | undefined => profiles.get(url)?.result
+
+  const acquire = (host: string, client: string | undefined): boolean => {
+    if (inFlight >= maxInFlight) return false
+    if ((perHost.get(host) ?? 0) >= maxPerHost) return false
+    if (client !== undefined && (perClient.get(client) ?? 0) >= maxPerClient) return false
+    inFlight++
+    adjust(perHost, host, 1)
+    if (client !== undefined) adjust(perClient, client, 1)
+    return true
+  }
+
+  const release = (host: string, client: string | undefined) => {
+    inFlight--
+    adjust(perHost, host, -1)
+    if (client !== undefined) adjust(perClient, client, -1)
+  }
+
   return {
-    async lookup(url: string): Promise<AgentProfileResult> {
+    async lookup(url: string, client?: string): Promise<AgentProfileResult> {
       const hit = cached(url)
       if (hit) return hit
-      if (inFlight >= AGENT_PROFILE_MAX_IN_FLIGHT) return { status: "busy" }
+      const shared = pending.get(url)
+      if (shared) return shared
 
-      inFlight++
-      try {
-        return remember(url, await fetchProfile(url, allowLoopback, lookupHost))
-      } finally {
-        inFlight--
-      }
+      const host = hostKey(url)
+      if (!acquire(host, client)) return lastKnown(url) ?? { status: "busy" }
+
+      const run = fetchProfile(url, allowLoopback, lookupHost)
+        .then(
+          (result) => remember(url, result),
+          () => remember(url, { status: "failed" }),
+        )
+        .finally(() => {
+          pending.delete(url)
+          release(host, client)
+        })
+      pending.set(url, run)
+      return run
     },
   }
 }
@@ -129,6 +201,7 @@ async function fetchProfile(
   const loopback = allowLoopback && url.protocol === "http:" && url.hostname === LOOPBACK_TEST_HOST
   if (url.protocol !== "https:" && !loopback) return { status: "failed" }
 
+  const deadline = Date.now() + AGENT_PROFILE_TIMEOUT_MS
   let target: ResolvedAddress
   if (loopback) {
     target = { address: LOOPBACK_TEST_HOST, family: 4 }
@@ -136,7 +209,9 @@ async function fetchProfile(
     const host = url.hostname.replace(/^\[|\]$/g, "")
     let addresses: ResolvedAddress[]
     try {
-      addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookupHost(host)
+      addresses = isIP(host)
+        ? [{ address: host, family: isIP(host) }]
+        : await withDeadline(lookupHost(host), deadline - Date.now())
     } catch {
       return { status: "failed" }
     }
@@ -146,8 +221,9 @@ async function fetchProfile(
     target = addresses[0]
   }
 
-  const deadline = Date.now() + AGENT_PROFILE_TIMEOUT_MS
-  let downloaded = await download(url, target, loopback, AGENT_PROFILE_TIMEOUT_MS)
+  const firstHopBudget = deadline - Date.now()
+  if (firstHopBudget <= 0) return { status: "failed" }
+  let downloaded = await download(url, target, loopback, firstHopBudget)
 
   if (downloaded.kind === "redirect") {
     const next = absoluteLocation(downloaded.location, url)

@@ -132,15 +132,16 @@ UCP is designed for **agent-to-merchant** interactions. It uses a shopping-cart 
 
 **Required headers:** `UCP-Agent`, `Request-Id`, and `UCP-Session-Secret` on every call that follows the create call (see below)
 
-**Session secret:** creating a cart or checkout session returns a random `UCP-Session-Secret` response header, once. Send it as the `UCP-Session-Secret` request header on every later call for that cart or session, and on `GET /ucp/orders/:id` for the order it placed. The store keeps only a hash of it. The `UCP-Agent` header and a Bearer token do not identify the buyer. A request without the secret, or with a wrong one, gets `403 session_ownership_mismatch` on carts and checkout sessions and `404 not_found` on orders. If a create response is lost, create a new session: a replayed create (same `Idempotency-Key`) does not return the secret again.
+**Session secret:** creating a cart or checkout session returns a random `UCP-Session-Secret` response header, once. Send it as the `UCP-Session-Secret` request header on every later call for that cart or session, and on `GET /ucp/orders/:id` for the order it placed. The store keeps only a hash of it. The `UCP-Agent` header and a Bearer token do not identify the buyer. A request without the secret gets `401 session_secret_required`, checked before anything is read. A wrong secret, or an unknown id, gets `404` with `cart_not_found`, `checkout_not_found` or `order_not_found`. The secret is checked before the version pin. URLs in responses carry ids only. If a create response is lost, create a new session: a replayed create (same `Idempotency-Key`) does not return the secret again.
 
-**Versions:** the store serves `ucp_version` (default: the latest version, currently `2026-08-25`) plus every version in `ucp_supported_versions` (default: every other known version, currently `2026-04-08`, `2026-01-23`). The version for a request comes from the `ucp.version` of the agent profile named in `UCP-Agent: ...; profile="https://..."`. The profile is fetched over HTTPS only, from public addresses only, with a 3 s timeout, a 128 KiB cap and no redirects, and cached for 10 minutes.
+**Versions:** the store serves `ucp_version` (default: the latest version, currently `2026-08-25`) plus every version in `ucp_supported_versions` (default: every other known version, currently `2026-04-08`, `2026-01-23`). The version for a request comes from the `ucp.version` of the agent profile named in `UCP-Agent: ...; profile="https://..."`. The profile is fetched over HTTPS only, from public addresses only, with a 3 s timeout, a 128 KiB cap and no redirects, and cached for 10 minutes. At most 16 profiles are fetched at once, 4 per host and 8 per client IP (`req.ip`); concurrent lookups of one URL share a single fetch, and a busy answer falls back to the last known profile of that URL. Rate-limit `/ucp` at your edge as well.
 
 | Agent profile | `lenient` (default) | `strict` |
 |---|---|---|
 | no `UCP-Agent` header | `400 missing_ucp_agent` | `400 missing_ucp_agent` |
 | no `profile` in `UCP-Agent` | current version | current version |
 | unreachable or not HTTPS | current version + warning log | `424 profile_unreachable` |
+| profile fetcher busy | current version + warning log, or the session version | `503 profile_fetch_busy` with `Retry-After: 3`, or the session version |
 | no or malformed `ucp.version` | current version + warning log | `422 profile_malformed` |
 | unknown version | `422 version_unsupported` | `422 version_unsupported` |
 | known version the store disabled | `422 version_unsupported` | `422 version_unsupported` |
@@ -317,7 +318,7 @@ import {
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_key` | `string` | `""` | API key for ACP Bearer token authentication |
-| `signatureKey` | `string` | `""` | HMAC-SHA256 key for request signing |
+| `signatureKey` | `string` | `""` | HMAC-SHA256 key for request signing. Set it in production: with no key, outbound webhook signatures can be computed by anyone and inbound `Signature` headers are rejected |
 | `storefront_url` | `string` | `"http://localhost:8000"` | Public URL of your storefront |
 | `store_name` | `string` | `"My Store"` | Store name in protocol responses |
 | `store_description` | `string` | `""` | Store description for discovery |
