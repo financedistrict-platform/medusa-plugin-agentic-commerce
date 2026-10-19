@@ -181,7 +181,7 @@ export function createIdempotencyMiddleware(options: {
     const originalJson = res.json.bind(res)
     res.json = function (body: unknown) {
       // Only cache successful responses (non-5xx)
-      if (res.statusCode < 500) {
+      if (res.statusCode < 500 && res.statusCode !== 202) {
         const completedEntry: CachedResponse = {
           status: "completed",
           body_hash: bodyHash,
