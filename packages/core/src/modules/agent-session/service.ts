@@ -31,11 +31,12 @@ class AgentSessionService extends MedusaService({ AgentSession, PaymentAuthoriza
     return row ?? null
   }
 
-  async open({ cartId, fingerprint, ucpVersion }: OpenAgentSessionInput): Promise<AgentSessionRecord> {
+  async open({ cartId, fingerprint, ucpVersion, webhookUrl }: OpenAgentSessionInput): Promise<AgentSessionRecord> {
     return (await this.createAgentSessions({
       cart_id: cartId,
       session_fingerprint: fingerprint,
       ucp_version: ucpVersion ?? null,
+      agent_webhook_url: webhookUrl || null,
       handler_data: {},
     })) as StoredRow
   }

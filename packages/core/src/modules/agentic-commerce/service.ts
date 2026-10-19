@@ -86,7 +86,7 @@ export default class AgenticCommerceService {
     this.acpVersion = options.acp_version || "2026-01-30"
 
     if (!this.signatureKey) {
-      console.warn("[agentic-commerce] signatureKey is not set in the plugin options or AGENTIC_COMMERCE_SIGNATURE_KEY. Outbound webhook signatures can be computed by anyone and inbound Signature headers are rejected until a key is set.")
+      console.warn("[agentic-commerce] signatureKey is not set in the plugin options or AGENTIC_COMMERCE_SIGNATURE_KEY. Outbound webhooks are not sent and inbound Signature headers are rejected until a key is set.")
     }
 
     if (!options.ucp_version) {
@@ -283,6 +283,7 @@ export default class AgenticCommerceService {
     payload: Record<string, unknown>
     maxRetries?: number
   }): Promise<{ status: number; success: boolean }> {
+    if (!this.signatureKey) return { status: 0, success: false }
     const resolved = await this.webhookDelivery.resolve(params.url)
     if (!resolved.valid) {
       console.warn(`[agentic-commerce] Blocked webhook to unsafe URL: ${resolved.reason}`)

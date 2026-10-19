@@ -47,6 +47,17 @@ describe("AgentSessionService", () => {
     expect(await service.find("cart_2")).toBeNull()
   })
 
+  it("keeps the agent webhook URL on the session it opens", async () => {
+    const rows: Row[] = []
+    const service = serviceOver(rows)
+
+    await service.open({ cartId: "cart_1", fingerprint: "fp", webhookUrl: "https://agent.example/hooks" })
+    await service.open({ cartId: "cart_2", fingerprint: "fp" })
+
+    expect(await service.find("cart_1")).toMatchObject({ agent_webhook_url: "https://agent.example/hooks" })
+    expect(await service.find("cart_2")).toMatchObject({ agent_webhook_url: null })
+  })
+
   it("records a cancellation once", async () => {
     const rows = [row()]
     const service = serviceOver(rows)

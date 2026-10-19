@@ -29,6 +29,7 @@ export type OpenAgentSessionInput = {
   cartId: string
   fingerprint: string
   ucpVersion?: string | null
+  webhookUrl?: string | null
 }
 
 export interface AgentSessionStore {

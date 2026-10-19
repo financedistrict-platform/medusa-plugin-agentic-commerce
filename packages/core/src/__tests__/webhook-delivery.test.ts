@@ -255,6 +255,24 @@ describe("webhook signing key", () => {
     expect(warn.mock.calls.filter(([message]) => String(message).includes("signatureKey is not set"))).toHaveLength(1)
   })
 
+  it("sends no webhook when no key is configured", async () => {
+    const receiver = await listen((_hit, res) => res.writeHead(200).end())
+    const service = withoutEnvKey(() => new LoopbackService({ signatureKey: "" }))
+
+    const result = await service.sendWebhookEvent(event(`http://127.0.0.1:${receiver.port}/hook`))
+
+    expect(result).toEqual({ status: 0, success: false })
+    expect(receiver.hits).toHaveLength(0)
+  })
+
+  it("says at startup that webhooks are not sent without a key", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    withoutEnvKey(() => new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism" }))
+
+    expect(warn.mock.calls.filter(([message]) => String(message).includes("Outbound webhooks are not sent"))).toHaveLength(1)
+  })
+
   it("does not warn when a key is configured", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 
