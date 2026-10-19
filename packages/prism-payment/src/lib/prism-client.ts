@@ -114,6 +114,15 @@ export function resolvePrismApiKey(configured?: unknown): string {
   return fromOptions || (process.env.PRISM_API_KEY ?? "").trim()
 }
 
+export const SETTLE_TIMEOUT_MS = 60_000
+
+export class PrismHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = "PrismHttpError"
+  }
+}
+
 export class PrismClient {
   private apiUrl: string
   private apiKey: string
@@ -169,7 +178,7 @@ export class PrismClient {
   }
 
   async settlePayment(request: PrismPaymentRequest): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(this.paymentPath(request, "settle"), request)
+    return this.post<Record<string, unknown>>(this.paymentPath(request, "settle"), request, SETTLE_TIMEOUT_MS)
   }
 
   private paymentPath(request: PrismPaymentRequest, action: "verify" | "settle"): string {
@@ -204,7 +213,7 @@ export class PrismClient {
     return response.json() as Promise<T>
   }
 
-  private async post<T>(path: string, body: unknown): Promise<T> {
+  private async post<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: "POST",
       headers: {
@@ -212,11 +221,12 @@ export class PrismClient {
         "X-API-Key": this.apiKey,
       },
       body: JSON.stringify(body),
+      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     })
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error")
       console.error(`[prism-client] POST ${path} failed (${response.status}): ${errorText}`)
-      throw new Error(`Prism POST ${path} failed: ${response.status}`)
+      throw new PrismHttpError(response.status, `Prism POST ${path} failed: ${response.status}`)
     }
     return response.json() as Promise<T>
   }
