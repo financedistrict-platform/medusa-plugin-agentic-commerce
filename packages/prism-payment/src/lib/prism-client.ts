@@ -92,7 +92,7 @@ export type X402AcceptEntry = {
   extra?: Record<string, unknown> | null
 }
 
-const SUPPORTED_X402_VERSIONS: readonly number[] = [1, 2]
+const SUPPORTED_X402_VERSIONS: readonly number[] = [2]
 
 export function isSupportedX402Version(version: unknown): version is number {
   return typeof version === "number" && SUPPORTED_X402_VERSIONS.includes(version)

@@ -32,7 +32,7 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
       api_key: "key",
       verify_before_settle: false,
     } as any)
-    settle = vi.fn().mockResolvedValue({ success: true, transaction: "0xtx", network: settledPayment.network, settled: settledPayment })
+    settle = vi.fn().mockResolvedValue({ state: "settled", settled: settledPayment })
     ;(provider as any).settleWithPrism = settle
   })
 

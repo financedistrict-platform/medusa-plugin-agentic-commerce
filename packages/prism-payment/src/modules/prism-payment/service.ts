@@ -362,6 +362,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       Math.floor(Date.now() / 1000),
       this.client.getApiKey(),
       this.allowedChains,
+      { resume: data.settlement_resume === true },
     )
   }
 

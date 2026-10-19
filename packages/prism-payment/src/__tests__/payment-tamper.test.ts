@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
-import { PrismClient, PrismHttpError } from "../lib/prism-client"
+import { PrismClient, PrismHttpError, isSupportedX402Version } from "../lib/prism-client"
 import settleFixture from "../__fixtures__/settle-replies.json"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import {
@@ -16,6 +16,7 @@ import {
   quotedEntry,
   signedCheckoutData,
   unsignedCheckoutData,
+  nowSeconds,
 } from "./helpers/quoted-payment"
 import { quoteSignatureFor } from "../lib/quote-binding"
 
@@ -765,19 +766,39 @@ describe("Prism x402 version", () => {
 
   const request = (x402Version: unknown) => ({ x402Version, paymentPayload: {}, paymentRequirements: {} }) as any
 
-  it.each([[1], [2]])("reaches the Prism v%s endpoint", async (version) => {
+  it("reaches the Prism v2 endpoint", async () => {
     const prism = new PrismClient({ apiUrl: "https://gw.test", apiKey: "key" })
 
-    await prism.verifyPayment(request(version))
-    await prism.settlePayment(request(version))
+    await prism.verifyPayment(request(2))
+    await prism.settlePayment(request(2))
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      `https://gw.test/api/v${version}/payment/verify`,
-      `https://gw.test/api/v${version}/payment/settle`,
+      "https://gw.test/api/v2/payment/verify",
+      "https://gw.test/api/v2/payment/settle",
     ])
   })
 
+  it("does not support x402 version 1", () => {
+    expect(isSupportedX402Version(1)).toBe(false)
+    expect(isSupportedX402Version(2)).toBe(true)
+  })
+
+  it("refuses a stored quote for x402 version 1 before calling Prism", async () => {
+    const { provider, client } = makeProvider()
+    const unsigned = unsignedCheckoutData()
+    ;(unsigned.ucp["xyz.fd.prism_payment"][0].config as { x402Version: number }).x402Version = 1
+    const quote = { ...unsigned, quoteSignature: quoteSignatureFor(unsigned, QUOTE_SIGNING_KEY) }
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential(), CART_TOTAL, quote) } as any)
+
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
   it.each([
+    ["version 1", 1],
     ["a path segment", "2/../../admin"],
     ["a query string", "2?x=1"],
     ["a version Prism does not serve", 3],
@@ -1210,5 +1231,112 @@ describe("Prism settle outcome on the payment session", () => {
     expect((result.data as Record<string, unknown>).error).toBe(error)
     expect(client.verifyPayment).not.toHaveBeenCalled()
     expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+})
+
+describe("Prism quote lifetime", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+  })
+
+  const authorizeQuote = async (quote: unknown, extra: Record<string, unknown> = {}, cred: unknown = credential()) => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { eip3009_authorization: encode(cred), x402_version: 2, prism_checkout_data: quote, ...extra },
+    } as any)
+    return provider.authorizePayment({ data: initiated.data } as any)
+  }
+
+  const agedQuote = (seconds: number) => signedCheckoutData(QUOTE_SIGNING_KEY, undefined, nowSeconds() - seconds)
+
+  it("refuses a quote prepared more than 900 seconds ago", async () => {
+    const result = await authorizeQuote(agedQuote(901))
+
+    expect((result.data as Record<string, unknown>).error).toBe("quote_expired")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("accepts a quote prepared less than 900 seconds ago", async () => {
+    const result = await authorizeQuote(agedQuote(890))
+
+    expect(result.status).toBe("authorized")
+  })
+
+  it("lets a resumed settlement through with a quote older than 900 seconds", async () => {
+    const result = await authorizeQuote(agedQuote(901), { settlement_resume: true })
+
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("lets a resumed settlement through after the signed authorization expired", async () => {
+    const result = await authorizeQuote(checkoutData, { settlement_resume: true }, credential({ validBefore: "1" }))
+
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("still refuses an expired signed authorization on a first attempt", async () => {
+    const result = await authorizeQuote(checkoutData, {}, credential({ validBefore: "1" }))
+
+    expect((result.data as Record<string, unknown>).error).toBe("authorization_expired")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("still refuses an authorization that is not valid yet on a resume", async () => {
+    const later = String(nowSeconds() + 600)
+
+    const result = await authorizeQuote(checkoutData, { settlement_resume: true }, credential({ validAfter: later }))
+
+    expect((result.data as Record<string, unknown>).error).toBe("authorization_not_yet_valid")
+  })
+
+  it("refuses a stored quote that does not say when it was prepared", async () => {
+    const { preparedAt: _dropped, ...undated } = unsignedCheckoutData() as Record<string, unknown>
+    const signed = { ...undated, quoteSignature: quoteSignatureFor(undated as never, QUOTE_SIGNING_KEY) }
+
+    const result = await authorizeQuote(signed)
+
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
+  })
+
+  it("refuses a quote whose preparation time was changed after signing", async () => {
+    const result = await authorizeQuote({ ...agedQuote(901), preparedAt: nowSeconds() })
+
+    expect((result.data as Record<string, unknown>).error).toBe("invalid_quote_signature")
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+  })
+
+  it("records when the quote was prepared and prepares again once it is too old to pay", async () => {
+    const adapter = new PrismPaymentHandlerAdapter({}, { api_url: "https://gw.test", api_key: QUOTE_SIGNING_KEY })
+    const preparePayment = vi.fn().mockResolvedValue({ x402Version: 2, resource: { url: "x" }, accepts: [quotedEntry] })
+    ;(adapter as any).client = {
+      getApiUrl: () => "https://gw.test",
+      getApiKey: () => QUOTE_SIGNING_KEY,
+      fetchUcpHandlers: vi.fn().mockResolvedValue({ "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", spec: "s", schema: "s", config: {} }] }),
+      fetchAcpHandlers: vi.fn().mockResolvedValue([]),
+      preparePayment,
+    }
+    const prepare = (stored?: unknown) => adapter.prepareCheckoutPayment({
+      cart: { id: "cart_1", total: CART_TOTAL, currency_code: "usd", metadata: {} },
+      stored,
+      checkoutBaseUrl: "https://shop.test/ucp/checkout-sessions",
+      storeName: "Shop",
+      ucpVersion: "2026-04-08",
+      container: { resolve: () => ({}) },
+    } as any)
+
+    const fresh = await prepare()
+    expect(Math.abs((fresh?.preparedAt ?? 0) - nowSeconds())).toBeLessThanOrEqual(1)
+    expect(await prepare(fresh)).toEqual(fresh)
+    expect(preparePayment).toHaveBeenCalledTimes(1)
+
+    const renewed = await prepare(agedQuote(901))
+    expect(preparePayment).toHaveBeenCalledTimes(2)
+    expect(renewed?.preparedAt).toBeGreaterThan(nowSeconds() - 5)
   })
 })
