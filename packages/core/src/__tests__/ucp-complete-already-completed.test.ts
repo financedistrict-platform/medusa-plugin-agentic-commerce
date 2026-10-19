@@ -19,12 +19,19 @@ import { PAYMENT_AUTHORIZATION_USED, PAYMENT_PENDING_MISMATCH, SETTLEMENT_UNDER_
 import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { guardPendingSettlement } from "../workflows/steps/guard-pending-settlement"
 import { beginSettlementAttempt, compensateSettlementAttempt } from "../workflows/steps/begin-settlement-attempt"
+import { markProviderCalled } from "../workflows/steps/mark-provider-called"
 import settleFixture from "../../../prism-payment/src/__fixtures__/settle-replies.json"
 import { createRequest, createResponse, createStoreService } from "./helpers/render-wire"
 
 const COMPLETE_BODY = {
   payment: {
     instruments: [{ id: "inst_1", handler_id: "com.example.pay", type: "x402", credential: { type: "x402", paymentPayload: { x: 1 } } }],
+  },
+}
+
+const OTHER_COMPLETE_BODY = {
+  payment: {
+    instruments: [{ id: "inst_1", handler_id: "com.example.pay", type: "x402", credential: { type: "x402", paymentPayload: { x: 2 } } }],
   },
 }
 
@@ -165,6 +172,24 @@ describe("completing a UCP session whose settlement is still open", () => {
       })
     }
 
+    function failAfterProviderCalled() {
+      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { eip3009_authorization: string } } }) => {
+        const settlement = await guardPendingSettlement(input, container)
+        const attempt = await beginSettlementAttempt({ ...input, resumed: settlement.resumed }, container)
+        await markProviderCalled(input.cart_id, container)
+        paymentSessions = [{ id: "ps_1", status: "pending", data: { credential_sha256: attempt.credential_sha256 } }]
+        await compensateSettlementAttempt(attempt, container)
+        throw new Error("could not save the authorized payment session")
+      })
+    }
+
+    function guardOnly() {
+      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { eip3009_authorization: string } } }) => {
+        await guardPendingSettlement(input, container)
+        throw new Error("the guard let a new credential through")
+      })
+    }
+
     async function post(idempotencyKey: string, body: unknown = COMPLETE_BODY) {
       const req: any = {
         ...createRequest(services, { id: "cart_1" }),
@@ -180,7 +205,7 @@ describe("completing a UCP session whose settlement is still open", () => {
       return res
     }
 
-    return { post, failSettleWith, sessions }
+    return { post, failSettleWith, failAfterProviderCalled, guardOnly, sessions }
   }
 
   const marker = (state: "settling" | "pending" | "review", overrides: Record<string, unknown> = {}) => ({
@@ -261,6 +286,37 @@ describe("completing a UCP session whose settlement is still open", () => {
     expect(first.statusCode).toBe(202)
     expect(retry.statusCode).toBe(200)
     expect(retry.body).toMatchObject({ status: "completed", order: { id: "order_1" } })
+  })
+
+  it("holds the settlement for review when the provider settled but its answer was never saved, and refuses a new credential", async () => {
+    const stack = settlementStack()
+    stack.failSettleWith({ settlement_state: "pending", unreconciled_transaction: "0xaa" })
+    await stack.post("key-first")
+
+    stack.failAfterProviderCalled()
+    const lost = await stack.post("key-lost")
+
+    expect(lost.statusCode).toBe(200)
+    expect(lost.body).toMatchObject({ status: "requires_escalation", messages: [{ code: "payment_requires_review" }] })
+    expect(stack.sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "review", transaction: "0xaa", reason: "provider_called_outcome_unsaved" })
+
+    stack.guardOnly()
+    const other = await stack.post("key-other", OTHER_COMPLETE_BODY)
+
+    expect(other.statusCode).toBe(200)
+    expect(other.body).toMatchObject({ status: "requires_escalation", messages: [{ code: "payment_requires_review" }] })
+    expect(stack.sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "review", transaction: "0xaa" })
+  })
+
+  it("holds a first attempt for review when the provider was called but its answer was never saved", async () => {
+    const stack = settlementStack()
+    stack.failAfterProviderCalled()
+
+    const lost = await stack.post("key-first-lost")
+
+    expect(lost.statusCode).toBe(200)
+    expect(lost.body).toMatchObject({ status: "requires_escalation" })
+    expect(stack.sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "review", resumed: false, transaction: null })
   })
 
   it("keeps the transaction when a resumed settle is rate limited", async () => {

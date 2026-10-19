@@ -11,6 +11,7 @@ export type PendingSettlementRecord = {
   started_at: string
   transaction?: string | null
   reason?: string | null
+  provider_called_at?: string | null
   updated_at: string
 }
 
@@ -50,6 +51,7 @@ export function mergedPendingSettlement(
     started_at: value.started_at,
     transaction: value.transaction || stored?.transaction || null,
     reason: value.reason ?? null,
+    provider_called_at: value.provider_called_at ?? null,
     updated_at: value.updated_at,
   }
 }

@@ -9,6 +9,8 @@ import type { PendingSettlementRecord } from "../lib/agent-session"
 import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { beginSettlementAttempt, compensateSettlementAttempt } from "../workflows/steps/begin-settlement-attempt"
 import { clearSettlementAttempt } from "../workflows/steps/clear-settlement-attempt"
+import { markProviderCalled } from "../workflows/steps/mark-provider-called"
+import "@medusajs/medusa/core-flows"
 
 type FlowNode = { action?: string; next?: FlowNode | FlowNode[] }
 
@@ -43,6 +45,18 @@ describe("UCP completion holds the cart lock from the total check to the order",
   it("adds shipping and creates the payment collection before the lock, since both take the cart lock themselves", () => {
     expect(at("ensure-shipping-method")).toBeLessThan(at("acquire-lock-step"))
     expect(at("ensure-payment-collection")).toBeLessThan(at("acquire-lock-step"))
+  })
+
+  it("records the provider call after every non-payment step of the cart completion and right before the payment is authorized", () => {
+    const completeCart = stepOrder((WorkflowManager.getWorkflow("complete-cart") as unknown as { flow_: FlowNode }).flow_)
+    const position = (action: string) => {
+      const index = completeCart.indexOf(action)
+      expect(index, `${action} in ${completeCart.join(" > ")}`).toBeGreaterThanOrEqual(0)
+      return index
+    }
+    expect(position("create-orders")).toBeLessThan(position("beforePaymentAuthorization"))
+    expect(position("reserve-inventory-step")).toBeLessThan(position("beforePaymentAuthorization"))
+    expect(position("beforePaymentAuthorization")).toBeLessThan(position("authorize-payment-session-step"))
   })
 
   it("releases the cart lock only after the payment is captured", () => {
@@ -148,6 +162,7 @@ describe("the settlement marker around the cart completion", () => {
       updated_at: NOW.toISOString(),
       transaction: null,
       reason: null,
+      provider_called_at: null,
     })
   })
 
@@ -167,8 +182,8 @@ describe("the settlement marker around the cart completion", () => {
     expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", resumed: true, transaction: "0xaa" })
   })
 
-  const compensate = async (sessionData: Record<string, unknown> | null, resumed: boolean, digest: string | null = credentialSha256(CREDENTIAL), status = "error") => {
-    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ state: "settling", credential_sha256: digest, transaction: "0xaa" }) }])
+  const compensate = async (sessionData: Record<string, unknown> | null, resumed: boolean, digest: string | null = credentialSha256(CREDENTIAL), status = "error", marker: Partial<PendingSettlementRecord> = {}) => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ state: "settling", credential_sha256: digest, transaction: "0xaa", ...marker }) }])
     const paymentSessions = [
       { id: "ps_other", provider_id: "pp_prism_prism", status: "error", data: { credential_sha256: "other", settlement_state: "settled" } },
       ...(sessionData ? [{ id: "ps_1", provider_id: "pp_prism_prism", status, data: { credential_sha256: credentialSha256(CREDENTIAL), ...sessionData } }] : []),
@@ -192,6 +207,41 @@ describe("the settlement marker around the cart completion", () => {
 
   it("clears the marker when the completion fails before the payment reaches the provider", async () => {
     expect(await compensate({}, false, credentialSha256(CREDENTIAL), "pending")).toBeNull()
+  })
+
+  it("holds the settlement for review when the provider was called but its answer was never saved", async () => {
+    const providerCalledAt = "2026-10-19T00:00:01.000Z"
+
+    expect(await compensate({}, false, credentialSha256(CREDENTIAL), "pending", { provider_called_at: providerCalledAt })).toMatchObject({
+      state: "review",
+      transaction: "0xaa",
+      provider_called_at: providerCalledAt,
+    })
+  })
+
+  it("records the provider call on the settling marker", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ state: "settling" }) }])
+
+    await markProviderCalled("cart_1", containerWith(sessions), NOW)
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", provider_called_at: NOW.toISOString() })
+  })
+
+  it("records nothing for a cart without an agent session or without a settling marker", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1" }])
+
+    await expect(markProviderCalled("cart_2", containerWith(sessions), NOW)).resolves.toBeUndefined()
+    await markProviderCalled("cart_1", containerWith(sessions), NOW)
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toBeNull()
+  })
+
+  it("starts every attempt without a recorded provider call", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ provider_called_at: "2026-10-19T00:00:01.000Z" }) }])
+
+    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: true }, containerWith(sessions), NOW)
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", provider_called_at: null })
   })
 
   it("keeps a resumed settlement pending when the completion fails before the payment reaches the provider", async () => {

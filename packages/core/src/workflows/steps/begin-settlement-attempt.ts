@@ -29,6 +29,7 @@ export async function beginSettlementAttempt(
     credential_sha256: attempt.credential_sha256,
     resumed: attempt.resumed,
     started_at: at,
+    provider_called_at: null,
     updated_at: at,
   })
   return attempt
@@ -68,7 +69,7 @@ export async function compensateSettlementAttempt(
     })
     const outcome = settlementAfterFailure(
       paymentSession,
-      { credential_sha256: attempt.credential_sha256, transaction: marker?.transaction ?? null },
+      { credential_sha256: attempt.credential_sha256, transaction: marker?.transaction ?? null, provider_called_at: marker?.provider_called_at ?? null },
       attempt.resumed,
     )
     if (outcome.kind === "clear") {
@@ -82,6 +83,7 @@ export async function compensateSettlementAttempt(
       started_at: marker?.started_at ?? now.toISOString(),
       transaction: outcome.transaction ?? null,
       reason: outcome.reason ?? null,
+      provider_called_at: marker?.provider_called_at ?? null,
       updated_at: now.toISOString(),
     })
   } catch (error: unknown) {

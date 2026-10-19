@@ -334,6 +334,8 @@ An unknown version or negotiation value stops the store at boot. So does a missi
 
 Point `payment_provider_id` only at a provider that verifies the agent's credential before it approves a payment. In production, also remove `pp_system_default` from every region: Medusa's own store routes can still complete a cart with any provider enabled on its region.
 
+The plugin records on the agent session that the payment provider is about to be called, through the `beforePaymentAuthorization` hook of `completeCartWorkflow`. A failure after that point holds the payment for review instead of freeing the cart for another credential. Medusa allows one handler per workflow hook, so a store or another plugin that registers its own `beforePaymentAuthorization` handler fails at boot with this plugin.
+
 ### Environment Variables
 
 | Variable | Maps to |

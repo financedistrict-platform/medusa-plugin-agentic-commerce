@@ -14,6 +14,8 @@ const marker = (overrides: Partial<PendingSettlementRecord> = {}): PendingSettle
 
 const failed = (data: Record<string, unknown>) => ({ status: "error", data })
 
+const CALLED = "2026-10-19T00:00:01.000Z"
+
 describe("credential digest", () => {
   it("is the sha256 hex of the credential as received", () => {
     expect(credentialSha256("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
@@ -30,6 +32,10 @@ describe("settlement state after a failed completion", () => {
     ["no matching payment session", null, marker(), "pending", "review"],
     ["an errored session without a settlement state", failed({ error: "x" }), marker(), "pending", "review"],
     ["a failure before the payment was sent to the provider", { status: "pending", data: { credential_sha256: "d1" } }, marker(), "clear", "pending"],
+    ["a failure after the provider was called but before its answer was saved", { status: "pending", data: { credential_sha256: "d1" } }, marker({ provider_called_at: CALLED }), "review", "review"],
+    ["a provider call without a matching payment session", null, marker({ provider_called_at: CALLED }), "review", "review"],
+    ["an errored session without a settlement state after the provider was called", failed({ error: "x" }), marker({ provider_called_at: CALLED }), "review", "review"],
+    ["a declined settle after the provider was called", failed({ settlement_state: "declined" }), marker({ provider_called_at: CALLED }), "clear", "review"],
   ])("records %s", (_label, session, stored, first, resume) => {
     expect(settlementAfterFailure(session, stored, false).kind).toBe(first)
     expect(settlementAfterFailure(session, stored, true).kind).toBe(resume)
@@ -53,6 +59,14 @@ describe("settlement state after a failed completion", () => {
 
   it("carries no transaction when a first attempt is cleared", () => {
     expect(settlementAfterFailure(failed({ settlement_state: "declined" }), marker({ transaction: "0xaa" }), false)).toEqual({ kind: "clear" })
+  })
+
+  it("holds a settlement for review with its known transaction when the provider answer was never saved", () => {
+    expect(settlementAfterFailure({ status: "pending", data: {} }, marker({ provider_called_at: CALLED, transaction: "0xaa" }), false)).toEqual({
+      kind: "review",
+      transaction: "0xaa",
+      reason: "provider_called_outcome_unsaved",
+    })
   })
 
   it("keeps the earlier pending state and transaction when a resume fails before the provider is called", () => {
