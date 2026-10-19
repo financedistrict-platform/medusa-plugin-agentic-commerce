@@ -16,6 +16,7 @@ import { ensureShippingMethodStep } from "./steps/ensure-shipping-method"
 import { ensurePaymentCollectionStep } from "./steps/ensure-payment-collection"
 import { setupPaymentStep } from "./steps/setup-payment"
 import { reservePaymentAuthorizationStep } from "./steps/reserve-payment-authorization"
+import { guardPendingSettlementStep } from "./steps/guard-pending-settlement"
 import { paymentToCapture } from "../lib/payment-to-capture"
 
 type CompleteCheckoutSessionInput = {
@@ -37,6 +38,26 @@ type CompleteCheckoutSessionInput = {
   billing_address?: Record<string, unknown>
 }
 
+export function completionPaymentData(input: CompleteCheckoutSessionInput) {
+  const authorization = input.payment_data?.eip3009_authorization
+  const legacyToken = input.payment_data?.token
+  const hasPaymentData = authorization || legacyToken
+
+  return {
+    cart_id: input.cart_id,
+    payment_provider_id: input.payment_provider_id,
+    ucp_version: input.ucp_version,
+    payment_data: hasPaymentData
+      ? {
+          eip3009_authorization: authorization || legacyToken,
+          x402_version: input.payment_data?.x402_version,
+          handler_id: input.payment_data?.handler_id,
+          instrument_type: input.payment_data?.instrument_type,
+        }
+      : undefined,
+  }
+}
+
 const completeCheckoutSessionWorkflow = createWorkflow(
   "complete-checkout-session",
   (input: CompleteCheckoutSessionInput) => {
@@ -51,30 +72,18 @@ const completeCheckoutSessionWorkflow = createWorkflow(
     acquireLockStep({ key: input.cart_id, timeout: 30, ttl: 120 })
 
     // Step 3: Setup payment collection + session
-    const paymentData = transform(input, (input) => {
-      // Pass EIP-3009 authorization or legacy token to the payment session
-      const authorization = input.payment_data?.eip3009_authorization
-      const legacyToken = input.payment_data?.token
-      const hasPaymentData = authorization || legacyToken
+    const paymentData = transform(input, completionPaymentData)
 
-      return {
-        cart_id: input.cart_id,
-        payment_provider_id: input.payment_provider_id,
-        ucp_version: input.ucp_version,
-        payment_data: hasPaymentData
-          ? {
-              eip3009_authorization: authorization || legacyToken,
-              x402_version: input.payment_data?.x402_version,
-              handler_id: input.payment_data?.handler_id,
-              instrument_type: input.payment_data?.instrument_type,
-            }
-          : undefined,
-      }
-    })
+    const settlement = guardPendingSettlementStep(paymentData)
 
     reservePaymentAuthorizationStep(paymentData)
 
-    setupPaymentStep(paymentData)
+    const setupInput = transform({ paymentData, settlement }, ({ paymentData, settlement }) => ({
+      ...paymentData,
+      resumed: settlement.resumed,
+    }))
+
+    setupPaymentStep(setupInput)
 
     // Step 4: Complete the cart → creates the order
     const completionResult = completeCartWorkflow.runAsStep({
