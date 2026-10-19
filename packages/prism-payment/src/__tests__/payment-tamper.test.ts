@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
 import { PrismClient, PrismHttpError, isSupportedX402Version } from "../lib/prism-client"
 import settleFixture from "../__fixtures__/settle-replies.json"
+import { Utils } from "@medusajs/framework/mikro-orm/core"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import {
   ASSET,
@@ -1352,5 +1353,76 @@ describe("Prism quote lifetime", () => {
     const renewed = await prepare(agedQuote(901))
     expect(preparePayment).toHaveBeenCalledTimes(2)
     expect(renewed?.preparedAt).toBeGreaterThan(nowSeconds() - 5)
+  })
+})
+
+describe("Prism raw credential after settle", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const initiated = async (extra: Record<string, unknown> = {}) => (await provider.initiatePayment({
+    amount: CART_TOTAL,
+    currency_code: "usd",
+    data: { eip3009_authorization: encode(credential()), x402_version: 2, prism_checkout_data: checkoutData, credential_sha256: "d1", ...extra },
+  } as any)).data as Record<string, unknown>
+
+  const stored = (before: Record<string, unknown>, returned: unknown) => Utils.merge({}, before, returned) as Record<string, unknown>
+
+  it.each([
+    ["a settled reply", { success: true, transaction: "0xtx", network: NETWORK }],
+    ["a pending reply", { success: false, errorReason: "settlement_pending", transaction: "0xaa" }],
+    ["a declined reply", { success: false, errorReason: "quote_not_found" }],
+    ["a review reply", { success: false, errorReason: "checkout_already_settled", transaction: "0xbb" }],
+  ])("overwrites the stored credential with null after %s", async (_label, reply) => {
+    client.settlePayment.mockResolvedValue(reply)
+    const before = await initiated({ settlement_resume: true })
+    const raw = before.eip3009_authorization as string
+
+    const result = await provider.authorizePayment({ data: before } as any)
+    const persisted = stored(before, result.data)
+
+    expect((result.data as Record<string, unknown>).eip3009_authorization).toBeNull()
+    expect((result.data as Record<string, unknown>).settlement_resume).toBeNull()
+    expect(persisted.eip3009_authorization).toBeNull()
+    expect(persisted.settlement_resume).toBeNull()
+    expect(persisted.credential_sha256).toBe("d1")
+    expect(JSON.stringify(persisted)).not.toContain(raw)
+  })
+
+  it("overwrites the stored credential with null when the settle call fails", async () => {
+    client.settlePayment.mockRejectedValue(new Error("socket hang up"))
+    const before = await initiated()
+
+    const persisted = stored(before, (await provider.authorizePayment({ data: before } as any)).data)
+
+    expect(persisted.eip3009_authorization).toBeNull()
+    expect(JSON.stringify(persisted)).not.toContain(before.eip3009_authorization as string)
+  })
+
+  it("keeps the credential for a manual capture and overwrites it once the capture settles", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+    const before = await initiated()
+    const raw = before.eip3009_authorization as string
+
+    const authorized = await provider.authorizePayment({ data: before } as any)
+    expect((authorized.data as Record<string, unknown>).eip3009_authorization).toBe(raw)
+
+    const paymentData = authorized.data as Record<string, unknown>
+    const captured = await provider.capturePayment({ data: paymentData } as any)
+    const persisted = stored(paymentData, captured.data)
+
+    expect(persisted.eip3009_authorization).toBeNull()
+    expect(persisted.x402_authorization).toBeNull()
+    expect(persisted.credential_sha256).toBe("d1")
+    expect(JSON.stringify(persisted)).not.toContain(raw)
   })
 })
