@@ -17,6 +17,8 @@ import { ensurePaymentCollectionStep } from "./steps/ensure-payment-collection"
 import { setupPaymentStep } from "./steps/setup-payment"
 import { reservePaymentAuthorizationStep } from "./steps/reserve-payment-authorization"
 import { guardPendingSettlementStep } from "./steps/guard-pending-settlement"
+import { beginSettlementAttemptStep } from "./steps/begin-settlement-attempt"
+import { clearSettlementAttemptStep } from "./steps/clear-settlement-attempt"
 import { paymentToCapture } from "../lib/payment-to-capture"
 
 type CompleteCheckoutSessionInput = {
@@ -85,6 +87,8 @@ const completeCheckoutSessionWorkflow = createWorkflow(
 
     setupPaymentStep(setupInput)
 
+    beginSettlementAttemptStep(setupInput)
+
     // Step 4: Complete the cart → creates the order
     const completionResult = completeCartWorkflow.runAsStep({
       input: transform(input, (input) => ({ id: input.cart_id })),
@@ -119,6 +123,8 @@ const completeCheckoutSessionWorkflow = createWorkflow(
         input: transform(paymentId, (id) => ({ payment_id: id as string })),
       })
     })
+
+    clearSettlementAttemptStep({ cart_id: input.cart_id })
 
     releaseLockStep({ key: input.cart_id })
 

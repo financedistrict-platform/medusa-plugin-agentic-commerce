@@ -53,3 +53,24 @@ describe("an unsupported currency is refused before the cart is created", () => 
     expect(steps.indexOf("validate-currency")).toBeLessThan(steps.indexOf("create-cart-as-step"))
   })
 })
+
+describe("a completion records its settlement under the cart lock", () => {
+  it("guards, reserves, sets up, marks the settlement, completes, captures and clears before the lock is released", () => {
+    const steps = stepsOf("complete-checkout-session")
+    const order = [
+      "acquire-lock-step",
+      "guard-pending-settlement",
+      "reserve-payment-authorization",
+      "setup-payment",
+      "begin-settlement-attempt",
+      "complete-cart-as-step",
+      "capture-payment-workflow-as-step",
+      "clear-settlement-attempt",
+      "release-lock-step",
+    ]
+    const positions = order.map((action) => steps.indexOf(action))
+
+    expect(positions.every((position) => position >= 0), steps.join(" > ")).toBe(true)
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+  })
+})

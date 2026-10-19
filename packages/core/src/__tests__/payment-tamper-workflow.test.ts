@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { WorkflowManager } from "@medusajs/framework/orchestration"
 import { completionPaymentData } from "../workflows/complete-checkout-session"
 import { guardPendingSettlement } from "../workflows/steps/guard-pending-settlement"
@@ -7,6 +7,8 @@ import { isPaymentPendingMismatch, isSettlementUnderReview } from "../lib/paymen
 import { credentialSha256 } from "../lib/credential-digest"
 import type { PendingSettlementRecord } from "../lib/agent-session"
 import { fakeAgentSessions } from "./helpers/agent-session-store"
+import { beginSettlementAttempt, compensateSettlementAttempt } from "../workflows/steps/begin-settlement-attempt"
+import { clearSettlementAttempt } from "../workflows/steps/clear-settlement-attempt"
 
 type FlowNode = { action?: string; next?: FlowNode | FlowNode[] }
 
@@ -127,5 +129,90 @@ describe("payment session data written by the checkout", () => {
     const mapped = completionPaymentData({ cart_id: "cart_1", payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08", payment_data: { token: CREDENTIAL } })
 
     expect(paymentSessionDataFor(mapped, undefined).credential_sha256).toBe(credentialSha256(CREDENTIAL))
+  })
+})
+
+describe("the settlement marker around the cart completion", () => {
+  const NOW = new Date("2026-10-19T01:00:00.000Z")
+
+  it("marks a credential payment as settling with its digest", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1" }])
+
+    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: false }, containerWith(sessions), NOW)
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toEqual({
+      state: "settling",
+      credential_sha256: credentialSha256(CREDENTIAL),
+      resumed: false,
+      started_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+      transaction: null,
+      reason: null,
+    })
+  })
+
+  it("marks a payment without a credential as settling with no digest", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1" }])
+
+    await beginSettlementAttempt({ cart_id: "cart_1", resumed: false }, containerWith(sessions), NOW)
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", credential_sha256: null })
+  })
+
+  it("keeps the transaction of an earlier attempt when a resume starts", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ transaction: "0xaa" }) }])
+
+    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: true }, containerWith(sessions), NOW)
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", resumed: true, transaction: "0xaa" })
+  })
+
+  const compensate = async (sessionData: Record<string, unknown> | null, resumed: boolean, digest: string | null = credentialSha256(CREDENTIAL)) => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ state: "settling", credential_sha256: digest, transaction: "0xaa" }) }])
+    const paymentSessions = [
+      { id: "ps_other", provider_id: "pp_prism_prism", status: "error", data: { credential_sha256: "other", settlement_state: "settled" } },
+      ...(sessionData ? [{ id: "ps_1", provider_id: "pp_prism_prism", status: "error", data: { credential_sha256: credentialSha256(CREDENTIAL), ...sessionData } }] : []),
+    ]
+    const query = { graph: vi.fn(async () => ({ data: [{ id: "cart_1", payment_collection: { payment_sessions: paymentSessions } }] })) }
+    await compensateSettlementAttempt({ cart_id: "cart_1", credential_sha256: digest, resumed }, containerWith(sessions, { query }), NOW)
+    return sessions.rows.get("cart_1")?.pending_settlement ?? null
+  }
+
+  it.each([
+    ["a settled payment that produced no order", { settlement_state: "settled", prism_tx_id: "0xtx" }, "review", "review"],
+    ["a pending settle", { settlement_state: "pending" }, "pending", "pending"],
+    ["a settle held for review", { settlement_state: "review" }, "review", "review"],
+    ["a declined settle", { settlement_state: "declined" }, null, "review"],
+    ["a failure without a matching session", null, "pending", "review"],
+    ["a session without a settlement state", { error: "x" }, "pending", "review"],
+  ])("records %s", async (_label, sessionData, first, resume) => {
+    expect((await compensate(sessionData, false))?.state ?? null).toBe(first)
+    expect((await compensate(sessionData, true))?.state ?? null).toBe(resume)
+  })
+
+  it("clears the marker of a payment without a credential", async () => {
+    expect(await compensate({ settlement_state: "pending" }, false, null)).toBeNull()
+    expect(await compensate(null, true, null)).toBeNull()
+  })
+
+  it("keeps the stored transaction when the failed settle reports none", async () => {
+    expect(await compensate({ settlement_state: "pending" }, true)).toMatchObject({ state: "pending", transaction: "0xaa" })
+  })
+
+  it("clears the marker after a paid order", async () => {
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ state: "settling" }) }])
+
+    await clearSettlementAttempt({ cart_id: "cart_1" }, containerWith(sessions))
+
+    expect(sessions.rows.get("cart_1")?.pending_settlement).toBeNull()
+  })
+
+  it("does not fail a paid order when the marker cannot be cleared", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const sessions = fakeAgentSessions([{ cart_id: "cart_1" }])
+    sessions.setPendingSettlement = vi.fn(async () => { throw new Error("db down") })
+
+    await expect(clearSettlementAttempt({ cart_id: "cart_1" }, containerWith(sessions))).resolves.toBeUndefined()
+    vi.restoreAllMocks()
   })
 })
