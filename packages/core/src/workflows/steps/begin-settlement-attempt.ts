@@ -1,6 +1,6 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { agentSessions } from "../../lib/agent-session"
-import { settlementAfterFailure } from "../../lib/settlement-after-failure"
+import { settlementAfterFailure, type FailedPaymentSession } from "../../lib/settlement-after-failure"
 import { credentialDigestOf, type GuardPendingSettlementInput } from "./guard-pending-settlement"
 
 export type BeginSettlementAttemptInput = GuardPendingSettlementInput & { resumed: boolean }
@@ -13,7 +13,7 @@ export type SettlementAttempt = {
 
 type Resolver = { resolve: (name: string) => unknown }
 
-type PaymentSessionRow = { id?: string; data?: Record<string, unknown> | null } | null
+type PaymentSessionRow = { id?: string; status?: string | null; data?: Record<string, unknown> | null } | null
 
 type Query = { graph(input: unknown): Promise<{ data: { payment_collection?: { payment_sessions?: PaymentSessionRow[] } | null }[] }> }
 
@@ -34,7 +34,7 @@ export async function beginSettlementAttempt(
   return attempt
 }
 
-async function sessionDataFor(container: Resolver, attempt: SettlementAttempt): Promise<Record<string, unknown> | null> {
+async function paymentSessionFor(container: Resolver, attempt: SettlementAttempt): Promise<FailedPaymentSession | null> {
   if (!attempt.credential_sha256) return null
   const query = container.resolve("query") as Query
   const { data: [cart] } = await query.graph({
@@ -51,7 +51,7 @@ async function sessionDataFor(container: Resolver, attempt: SettlementAttempt): 
   const match = (cart?.payment_collection?.payment_sessions ?? []).find(
     (session) => session?.data?.credential_sha256 === attempt.credential_sha256,
   )
-  return match?.data ?? null
+  return match ? { status: match.status ?? null, data: match.data ?? null } : null
 }
 
 export async function compensateSettlementAttempt(
@@ -62,12 +62,12 @@ export async function compensateSettlementAttempt(
   const sessions = agentSessions(container)
   try {
     const marker = (await sessions.find(attempt.cart_id))?.pending_settlement
-    const sessionData = await sessionDataFor(container, attempt).catch((error: unknown) => {
+    const paymentSession = await paymentSessionFor(container, attempt).catch((error: unknown) => {
       console.error(`[agentic-commerce] Could not read the payment sessions of cart ${attempt.cart_id}: ${error instanceof Error ? error.message : String(error)}`)
       return null
     })
     const outcome = settlementAfterFailure(
-      sessionData,
+      paymentSession,
       { credential_sha256: attempt.credential_sha256, transaction: marker?.transaction ?? null },
       attempt.resumed,
     )

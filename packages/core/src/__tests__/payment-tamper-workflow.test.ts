@@ -167,11 +167,11 @@ describe("the settlement marker around the cart completion", () => {
     expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", resumed: true, transaction: "0xaa" })
   })
 
-  const compensate = async (sessionData: Record<string, unknown> | null, resumed: boolean, digest: string | null = credentialSha256(CREDENTIAL)) => {
+  const compensate = async (sessionData: Record<string, unknown> | null, resumed: boolean, digest: string | null = credentialSha256(CREDENTIAL), status = "error") => {
     const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ state: "settling", credential_sha256: digest, transaction: "0xaa" }) }])
     const paymentSessions = [
       { id: "ps_other", provider_id: "pp_prism_prism", status: "error", data: { credential_sha256: "other", settlement_state: "settled" } },
-      ...(sessionData ? [{ id: "ps_1", provider_id: "pp_prism_prism", status: "error", data: { credential_sha256: credentialSha256(CREDENTIAL), ...sessionData } }] : []),
+      ...(sessionData ? [{ id: "ps_1", provider_id: "pp_prism_prism", status, data: { credential_sha256: credentialSha256(CREDENTIAL), ...sessionData } }] : []),
     ]
     const query = { graph: vi.fn(async () => ({ data: [{ id: "cart_1", payment_collection: { payment_sessions: paymentSessions } }] })) }
     await compensateSettlementAttempt({ cart_id: "cart_1", credential_sha256: digest, resumed }, containerWith(sessions, { query }), NOW)
@@ -184,10 +184,18 @@ describe("the settlement marker around the cart completion", () => {
     ["a settle held for review", { settlement_state: "review" }, "review", "review"],
     ["a declined settle", { settlement_state: "declined" }, null, "review"],
     ["a failure without a matching session", null, "pending", "review"],
-    ["a session without a settlement state", { error: "x" }, "pending", "review"],
+    ["an errored session without a settlement state", { error: "x" }, "pending", "review"],
   ])("records %s", async (_label, sessionData, first, resume) => {
     expect((await compensate(sessionData, false))?.state ?? null).toBe(first)
     expect((await compensate(sessionData, true))?.state ?? null).toBe(resume)
+  })
+
+  it("clears the marker when the completion fails before the payment reaches the provider", async () => {
+    expect(await compensate({}, false, credentialSha256(CREDENTIAL), "pending")).toBeNull()
+  })
+
+  it("keeps a resumed settlement pending when the completion fails before the payment reaches the provider", async () => {
+    expect(await compensate({}, true, credentialSha256(CREDENTIAL), "pending")).toMatchObject({ state: "pending", transaction: "0xaa" })
   })
 
   it("clears the marker of a payment without a credential", async () => {
