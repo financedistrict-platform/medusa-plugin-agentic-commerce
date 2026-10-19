@@ -54,6 +54,7 @@ export { default as AgentSessionModule, AGENT_SESSION_MODULE } from "./modules/a
 export type { PaymentHandlerAdapter, CheckoutPrepareInput } from "./types/payment-handler-adapter"
 export type { AgentSessionRecord, AgentSessionStore } from "./lib/agent-session"
 export { PaymentHandlerRegistry } from "./lib/payment-handler-registry"
+export { CART_LOCK_TTL_SECONDS } from "./workflows/complete-checkout-session"
 
 // =====================================================
 // Service exports (for type usage)

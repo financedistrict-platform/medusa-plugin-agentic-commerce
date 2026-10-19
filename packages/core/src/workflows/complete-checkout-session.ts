@@ -40,6 +40,8 @@ type CompleteCheckoutSessionInput = {
   billing_address?: Record<string, unknown>
 }
 
+export const CART_LOCK_TTL_SECONDS = 120
+
 export function completionPaymentData(input: CompleteCheckoutSessionInput) {
   const authorization = input.payment_data?.eip3009_authorization
   const legacyToken = input.payment_data?.token
@@ -71,7 +73,7 @@ const completeCheckoutSessionWorkflow = createWorkflow(
 
     ensurePaymentCollectionStep({ cart_id: input.cart_id })
 
-    acquireLockStep({ key: input.cart_id, timeout: 30, ttl: 120 })
+    acquireLockStep({ key: input.cart_id, timeout: 30, ttl: CART_LOCK_TTL_SECONDS })
 
     // Step 3: Setup payment collection + session
     const paymentData = transform(input, completionPaymentData)
