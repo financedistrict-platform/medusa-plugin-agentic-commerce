@@ -206,7 +206,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     if (!binding.ok) return failed(data, binding.error, "declined")
     const network = binding.requirements.network.toLowerCase()
 
-    if (this.verifyBeforeSettle) {
+    if (this.verifyBeforeSettle && data.settlement_resume !== true) {
       try {
         const verifyResult = await this.verifyWithPrism(authorization, binding)
         if (!verifyResult.isValid) {

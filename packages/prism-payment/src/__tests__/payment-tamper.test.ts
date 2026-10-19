@@ -1175,6 +1175,20 @@ describe("Prism settle outcome on the payment session", () => {
     expect(client.settlePayment).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["Prism would say the payment is not valid", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockResolvedValue({ isValid: false })],
+    ["the verification call would fail", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockRejectedValue(new Error("timeout"))],
+  ])("lets the settle answer decide a resume when %s", async (_label, arrange) => {
+    arrange(client)
+    client.settlePayment.mockResolvedValue({ success: false, errorReason: "authorization_consumed" })
+
+    const result = await authorizeWith({ settlement_resume: true })
+
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+    expect(result.data).toMatchObject({ settlement_state: "review", credential_sha256: "d1" })
+  })
+
   it("keeps a manual capture flow unchanged: authorizes without settling and captures afterwards", async () => {
     ;({ provider, client } = makeProvider({ auto_capture: false }))
 
