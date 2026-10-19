@@ -13,6 +13,7 @@ import {
   isSettlementUnderReview,
   PAYMENT_AUTHORIZATION_USED,
   PAYMENT_PENDING_MISMATCH,
+  SETTLEMENT_PENDING,
 } from "../../../../../lib/payment-ledger"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
@@ -108,11 +109,11 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     if (error?.type !== "duplicate_error" && (isPaymentPendingMismatch(error) || isSettlementUnderReview(error) || marker)) {
       const code = isPaymentPendingMismatch(error) ? PAYMENT_PENDING_MISMATCH
         : isSettlementUnderReview(error) || marker?.state === "review" ? "payment_requires_review"
-        : "settlement_pending"
+        : SETTLEMENT_PENDING
       res.status(409).json(formatAcpError({
         type: "invalid_request",
         code,
-        message: code === "settlement_pending"
+        message: code === SETTLEMENT_PENDING
           ? "The payment is still settling. Retry the completion with the same payment credential."
           : code === "payment_requires_review"
             ? "The payment needs a review by the merchant before the order can be placed."

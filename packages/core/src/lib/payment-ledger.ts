@@ -37,6 +37,8 @@ export function isPaymentPendingMismatch(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === PAYMENT_PENDING_MISMATCH
 }
 
+export const SETTLEMENT_PENDING = "settlement_pending"
+
 export const SETTLEMENT_UNDER_REVIEW = "settlement_under_review"
 
 export const SETTLEMENT_UNDER_REVIEW_MESSAGE =

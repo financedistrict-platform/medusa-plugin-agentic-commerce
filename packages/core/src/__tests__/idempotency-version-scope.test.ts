@@ -20,7 +20,7 @@ function cacheModule() {
   }
 }
 
-function harness(answerStatus = 201) {
+function harness(answerStatus = 201, answerBody: Record<string, unknown> = {}) {
   const cache = cacheModule()
   const service = new AgenticCommerceService({}, { payment_provider_id: "pp_prism_prism" })
   const services: Record<string, unknown> = { [Modules.CACHE]: cache, agenticCommerce: service }
@@ -47,7 +47,7 @@ function harness(answerStatus = 201) {
     }
     await middleware(req, res, () => {
       executions++
-      res.status(answerStatus).json({ ucp: { version }, id: `session_${executions}` })
+      res.status(answerStatus).json({ ucp: { version }, id: `session_${executions}`, ...answerBody })
     })
     await Promise.resolve()
     return res
@@ -100,5 +100,26 @@ describe("UCP idempotency for a settlement that is still pending", () => {
     expect(retry.headers["Idempotent-Replayed"]).toBeUndefined()
     expect(executions()).toBe(2)
     expect([...cache.entries.keys()].filter((key) => key.endsWith("idem-pending"))).toHaveLength(0)
+  })
+
+  it("does not replay a 409 settlement_pending answer, so a retry with the same key reaches the checkout again", async () => {
+    const { cache, send, executions } = harness(409, { code: "settlement_pending" })
+
+    await send(CURRENT, "idem-acp-pending")
+    const retry = await send(CURRENT, "idem-acp-pending")
+
+    expect(retry.headers["Idempotent-Replayed"]).toBeUndefined()
+    expect(executions()).toBe(2)
+    expect([...cache.entries.keys()].filter((key) => key.endsWith("idem-acp-pending"))).toHaveLength(0)
+  })
+
+  it("still replays any other 409 answer", async () => {
+    const { send, executions } = harness(409, { code: "payment_requires_review" })
+
+    await send(CURRENT, "idem-review")
+    const replay = await send(CURRENT, "idem-review")
+
+    expect(replay.headers["Idempotent-Replayed"]).toBe("true")
+    expect(executions()).toBe(1)
   })
 })
