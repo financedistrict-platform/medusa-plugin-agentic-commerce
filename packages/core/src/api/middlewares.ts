@@ -319,11 +319,7 @@ function verifySessionOwner(protocol: SessionProtocol, notFoundCode = "not_found
     }
 
     if (!verifySessionOwnership(session, fingerprint)) {
-      if (protocol === "ucp") {
-        reject(404, notFoundCode, notFoundMessage)
-      } else {
-        reject(403, "session_ownership_mismatch", "You do not have permission to modify this checkout session")
-      }
+      reject(404, notFoundCode, notFoundMessage)
       return
     }
 

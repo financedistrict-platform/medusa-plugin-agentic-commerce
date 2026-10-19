@@ -239,13 +239,13 @@ describe("session ownership", () => {
   it("rejects another agent that rewrote the fingerprint in cart metadata to its own", async () => {
     const { passed, res } = await ownerCheck(agentB, { session_fingerprint: fingerprintOf(agentA) }, { session_fingerprint: fingerprintOf(agentB) })
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(404)
   })
 
   it("rejects another agent when the fingerprint was deleted from cart metadata", async () => {
     const { passed, res } = await ownerCheck(agentB, { session_fingerprint: fingerprintOf(agentA) }, {})
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(404)
   })
 
   it("rejects a cart that no agent opened a session for", async () => {
