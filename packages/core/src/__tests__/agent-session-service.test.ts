@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest"
+import { Utils } from "@medusajs/framework/mikro-orm/core"
 import AgentSessionService from "../modules/agent-session/service"
+import { Migration20261019120000 } from "../modules/agent-session/migrations/Migration20261019120000"
+import type { PendingSettlementRecord } from "../lib/agent-session"
 
-type Row = { id: string; cart_id: string; session_fingerprint: string; ucp_version: string | null; canceled_at: Date | null; handler_data: Record<string, unknown> | null }
+type Row = { id: string; cart_id: string; session_fingerprint: string; ucp_version: string | null; canceled_at: Date | null; handler_data: Record<string, unknown> | null; pending_settlement?: Record<string, unknown> | null }
 
 function serviceOver(rows: Row[]) {
   const service = Object.create(AgentSessionService.prototype) as AgentSessionService & Record<string, unknown>
@@ -12,7 +15,10 @@ function serviceOver(rows: Row[]) {
     return row
   }
   service.updateAgentSessions = async (data: Partial<Row> & { id: string }) => {
-    Object.assign(rows.find((row) => row.id === data.id)!, data)
+    const stored = rows.find((row) => row.id === data.id)! as Record<string, unknown>
+    for (const [key, value] of Object.entries(data)) {
+      stored[key] = Utils.isPlainObject(stored[key]) && Utils.isPlainObject(value) ? Utils.merge({}, stored[key], value) : value
+    }
   }
   service.deleteAgentSessions = async (id: string) => {
     rows.splice(rows.findIndex((row) => row.id === id), 1)
@@ -78,5 +84,71 @@ describe("AgentSessionService", () => {
     await service.discard("cart_1")
 
     expect(rows).toEqual([])
+  })
+})
+
+describe("agent session pending settlement", () => {
+  const marker = (overrides: Partial<PendingSettlementRecord> = {}): PendingSettlementRecord => ({
+    state: "settling",
+    credential_sha256: "d1",
+    resumed: false,
+    started_at: "2026-10-19T00:00:00.000Z",
+    updated_at: "2026-10-19T00:00:00.000Z",
+    ...overrides,
+  })
+
+  it("adds the pending settlement and agent webhook columns and drops them again", async () => {
+    const up: string[] = []
+    const down: string[] = []
+    const migration = Object.create(Migration20261019120000.prototype) as Migration20261019120000 & { addSql: (sql: string) => void }
+
+    migration.addSql = (sql: string) => { up.push(sql) }
+    await migration.up()
+    migration.addSql = (sql: string) => { down.push(sql) }
+    await migration.down()
+
+    expect(up).toEqual([
+      'alter table "agent_session" add column if not exists "pending_settlement" jsonb null;',
+      'alter table "agent_session" add column if not exists "agent_webhook_url" text null;',
+    ])
+    expect(down).toEqual([
+      'alter table "agent_session" drop column if exists "pending_settlement";',
+      'alter table "agent_session" drop column if exists "agent_webhook_url";',
+    ])
+  })
+
+  it("stores a settlement marker and clears it again", async () => {
+    const rows = [row()]
+    const service = serviceOver(rows)
+
+    await service.setPendingSettlement("cart_1", marker())
+    expect((await service.find("cart_1"))?.pending_settlement).toMatchObject({ state: "settling", credential_sha256: "d1" })
+
+    await service.setPendingSettlement("cart_1", null)
+    expect((await service.find("cart_1"))?.pending_settlement).toBeNull()
+  })
+
+  it("keeps a stored transaction when a later write carries none", async () => {
+    const rows = [row()]
+    const service = serviceOver(rows)
+
+    await service.setPendingSettlement("cart_1", marker({ state: "pending", transaction: "0xaa", reason: "settlement_pending" }))
+    await service.setPendingSettlement("cart_1", marker({ state: "pending" }))
+
+    expect((await service.find("cart_1"))?.pending_settlement).toMatchObject({ state: "pending", transaction: "0xaa" })
+  })
+
+  it("does not keep a stale reason from an earlier write", async () => {
+    const rows = [row()]
+    const service = serviceOver(rows)
+
+    await service.setPendingSettlement("cart_1", marker({ state: "pending", reason: "settlement_pending" }))
+    await service.setPendingSettlement("cart_1", marker({ state: "settling", resumed: true }))
+
+    expect((await service.find("cart_1"))?.pending_settlement).toMatchObject({ state: "settling", resumed: true, reason: null })
+  })
+
+  it("refuses to store a marker for a cart without a session", async () => {
+    await expect(serviceOver([]).setPendingSettlement("cart_1", marker())).rejects.toThrow("No agent session exists for cart cart_1")
   })
 })

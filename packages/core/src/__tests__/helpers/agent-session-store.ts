@@ -1,4 +1,4 @@
-import type { AgentSessionRecord, AgentSessionStore } from "../../lib/agent-session"
+import { mergedPendingSettlement, type AgentSessionRecord, type AgentSessionStore } from "../../lib/agent-session"
 
 export type SessionSeed = Partial<AgentSessionRecord> & { cart_id: string }
 
@@ -8,6 +8,8 @@ export function sessionRecord(seed: SessionSeed): AgentSessionRecord {
     ucp_version: null,
     canceled_at: null,
     handler_data: {},
+    pending_settlement: null,
+    agent_webhook_url: null,
     ...seed,
   }
 }
@@ -37,6 +39,11 @@ export function fakeAgentSessions(seeds: SessionSeed[] = []) {
     },
     async discard(cartId) {
       rows.delete(cartId)
+    },
+    async setPendingSettlement(cartId, value) {
+      const row = rows.get(cartId)
+      if (!row) throw new Error(`No agent session exists for cart ${cartId}`)
+      rows.set(cartId, { ...row, pending_settlement: value ? mergedPendingSettlement(row.pending_settlement, value) : null })
     },
   }
   return store

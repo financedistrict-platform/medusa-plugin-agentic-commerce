@@ -1,7 +1,7 @@
 import { MedusaService } from "@medusajs/framework/utils"
 import AgentSession from "./models/agent-session"
 import PaymentAuthorization from "./models/payment-authorization"
-import type { AgentSessionRecord, AgentSessionStore, OpenAgentSessionInput } from "../../lib/agent-session"
+import { mergedPendingSettlement, type AgentSessionRecord, type AgentSessionStore, type OpenAgentSessionInput, type PendingSettlementRecord } from "../../lib/agent-session"
 import type { AuthorizationUse, PaymentLedgerStore } from "../../lib/payment-ledger"
 
 type StoredRow = AgentSessionRecord & { id: string }
@@ -51,6 +51,14 @@ class AgentSessionService extends MedusaService({ AgentSession, PaymentAuthoriza
     await this.updateAgentSessions({
       id: row.id,
       handler_data: { ...(row.handler_data ?? {}), ...entries },
+    })
+  }
+
+  async setPendingSettlement(cartId: string, value: PendingSettlementRecord | null): Promise<void> {
+    const row = await this.requireRow(cartId)
+    await this.updateAgentSessions({
+      id: row.id,
+      pending_settlement: value ? mergedPendingSettlement(row.pending_settlement, value) : null,
     })
   }
 
