@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
-import { PrismClient } from "../lib/prism-client"
+import { PrismClient, PrismHttpError } from "../lib/prism-client"
+import settleFixture from "../__fixtures__/settle-replies.json"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import {
   ASSET,
@@ -1020,5 +1021,194 @@ describe("Prism provider settles a session only once", () => {
     } as any)
 
     expect((updated.data as Record<string, unknown>).payment_quote).toEqual(quote)
+  })
+})
+
+describe("Prism settle outcome on the payment session", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const quotedData = async (extra: Record<string, unknown> = {}, cred: unknown = credential()) => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { eip3009_authorization: encode(cred), x402_version: 2, prism_checkout_data: checkoutData, credential_sha256: "d1", ...extra },
+    } as any)
+    return initiated.data as Record<string, unknown>
+  }
+
+  const authorizeWith = async (extra: Record<string, unknown> = {}, cred?: unknown) =>
+    provider.authorizePayment({ data: await quotedData(extra, cred) } as any)
+
+  const replyRows = settleFixture.rows.filter((row) => row.http === 200)
+
+  it.each(replyRows)("records $first for a $name reply on a first attempt", async (row) => {
+    client.settlePayment.mockResolvedValue(row.body)
+
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: row.first, credential_sha256: "d1" })
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+    const transaction = (row.body as Record<string, unknown>).transaction
+    if (transaction) expect(result.data).toMatchObject({ unreconciled_transaction: transaction })
+  })
+
+  it.each(replyRows)("records $resume for a $name reply on a resume", async (row) => {
+    client.settlePayment.mockResolvedValue(row.body)
+
+    const result = await authorizeWith({ settlement_resume: true })
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: row.resume, credential_sha256: "d1" })
+  })
+
+  it.each([
+    ["a conflict answer", new PrismHttpError(409, "conflict"), "pending"],
+    ["a rate limit answer", new PrismHttpError(429, "slow down"), "pending"],
+    ["a server error answer", new PrismHttpError(503, "down"), "pending"],
+    ["a refused request", new PrismHttpError(400, "bad request"), "declined"],
+    ["a network failure", new Error("socket hang up"), "pending"],
+  ])("records the outcome of %s", async (_label, error, state) => {
+    client.settlePayment.mockRejectedValue(error)
+
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: state, credential_sha256: "d1" })
+  })
+
+  it("records a refused request on a resume as review", async () => {
+    client.settlePayment.mockRejectedValue(new PrismHttpError(400, "bad request"))
+
+    const result = await authorizeWith({ settlement_resume: true })
+
+    expect(result.data).toMatchObject({ settlement_state: "review" })
+  })
+
+  it("authorizes a settled reply and records it as settled", async () => {
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("authorized")
+    expect(result.data).toMatchObject({ settlement_state: "settled", prism_tx_id: "0xtx", credential_sha256: "d1" })
+  })
+
+  it("holds a settled reply that does not match the quote for review and keeps its transaction", async () => {
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xmoved", network: "eip155:1" })
+
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: "review", unreconciled_transaction: "0xmoved" })
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+  })
+
+  it("records a settled session that no longer matches its quote as review", async () => {
+    const settled = (await authorizeWith()).data as Record<string, unknown>
+
+    const again = await provider.authorizePayment({ data: { ...settled, settled_amount: "1" } } as any)
+
+    expect(again.status).toBe("error")
+    expect(again.data).toMatchObject({ settlement_state: "review", credential_sha256: "d1" })
+  })
+
+  it.each([
+    ["a missing credential", async (data: Record<string, unknown>) => {
+      const { eip3009_authorization: _dropped, ...rest } = data
+      return rest
+    }],
+    ["an undecodable credential", async (data: Record<string, unknown>) => ({ ...data, eip3009_authorization: "%%%" })],
+  ])("declines %s before calling Prism", async (_label, tamper) => {
+    const result = await provider.authorizePayment({ data: await tamper(await quotedData()) } as any)
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: "declined", credential_sha256: "d1" })
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("declines a credential that does not match the quote before calling Prism", async () => {
+    const result = await authorizeWith({}, credential({ value: "1" }))
+
+    expect(result.data).toMatchObject({ settlement_state: "declined", credential_sha256: "d1" })
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["Prism says the payment is not valid", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockResolvedValue({ isValid: false })],
+    ["the verification call fails", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockRejectedValue(new Error("timeout"))],
+  ])("declines when %s", async (_label, arrange) => {
+    arrange(client)
+
+    const result = await authorizeWith()
+
+    expect(result.data).toMatchObject({ settlement_state: "declined", credential_sha256: "d1" })
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("keeps a manual capture flow unchanged: authorizes without settling and captures afterwards", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+
+    const authorized = await authorizeWith()
+
+    expect(authorized.status).toBe("authorized")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+    expect(authorized.data).toHaveProperty("eip3009_authorization")
+    expect(authorized.data).toMatchObject({ credential_sha256: "d1" })
+
+    const captured = await provider.capturePayment({ data: authorized.data } as any)
+
+    expect(captured.data).toMatchObject({ captured: true, prism_tx_id: "0xtx" })
+  })
+
+  it.each([
+    ["the text true", "true"],
+    ["the number one", 1],
+  ])("does not take %s as a resume flag", async (_label, flag) => {
+    const data = await quotedData({ settlement_resume: flag })
+
+    expect(data).not.toHaveProperty("settlement_resume")
+  })
+
+  it("keeps a resume flag and a credential digest written by the checkout", async () => {
+    const data = await quotedData({ settlement_resume: true })
+
+    expect(data).toMatchObject({ settlement_resume: true, credential_sha256: "d1" })
+  })
+
+  it("drops a credential digest that is not a string", async () => {
+    const data = await quotedData({ credential_sha256: 123 })
+
+    expect(data).not.toHaveProperty("credential_sha256")
+  })
+
+  it("drops the resume flag on a session update and keeps the digest and the quote", async () => {
+    const data = await quotedData({ settlement_resume: true })
+
+    const updated = (await provider.updatePayment({ amount: CART_TOTAL, currency_code: "usd", data } as any)).data as Record<string, unknown>
+
+    expect(updated).not.toHaveProperty("settlement_resume")
+    expect(updated).toMatchObject({ credential_sha256: "d1", payment_quote: data.payment_quote })
+  })
+
+  it.each([
+    ["no quote", (data: Record<string, unknown>) => ({ ...data, payment_quote: undefined }), "missing_payment_quote"],
+    ["a quote with a wrong signature", (data: Record<string, unknown>) => ({ ...data, payment_quote: { ...(data.payment_quote as object), signature: "0".repeat(64) } }), "invalid_quote_signature"],
+  ])("does not let a resume flag pass %s", async (_label, tamper, error) => {
+    const data = await quotedData({ settlement_resume: true })
+
+    const result = await provider.authorizePayment({ data: tamper(data) } as any)
+
+    expect((result.data as Record<string, unknown>).error).toBe(error)
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
   })
 })
