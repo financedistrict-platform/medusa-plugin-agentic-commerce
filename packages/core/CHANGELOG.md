@@ -1,5 +1,13 @@
 # @financedistrict/medusa-plugin-agentic-commerce
 
+## 1.1.6
+
+### Patch Changes
+
+- [#77](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/77) [`1fde896`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/1fde8968851a2f4530c9b9f5fed0e1f14d3687c7) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Medusa's own cart completion now refuses an agent cart: a `completeCartWorkflow` validate hook lets it complete only inside the agent checkout completion. Agent webhooks go only to the URL stored on the agent session (never to a URL in cart metadata), and no webhook is sent when no signing key is set. An ACP checkout session owned by another agent now answers 404, the same as a missing session.
+
+- [#77](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/77) [`1fde896`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/1fde8968851a2f4530c9b9f5fed0e1f14d3687c7) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Keep a pending or unknown Prism settlement open under the cart lock: UCP answers 202 or 200 with the session, ACP answers 409, a retry with the same credential resumes, a different credential is refused, and update and cancel wait. Stores must run `npx medusa db:migrate`. A failure after the payment provider was called but before its answer was saved holds the payment for review, so the cart cannot be paid again with another credential.
+
 ## 1.1.5
 
 ### Patch Changes
