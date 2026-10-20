@@ -7,8 +7,12 @@ import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../l
 import { recordSettledPayment, settledSessionData } from "../../../../../lib/settled-payment-record"
 import {
   isAuthorizationUsed,
+  isPaymentPendingMismatch,
+  isSettlementUnderReview,
   PAYMENT_AUTHORIZATION_USED,
   PAYMENT_AUTHORIZATION_USED_MESSAGE,
+  PAYMENT_PENDING_MISMATCH,
+  PAYMENT_PENDING_MISMATCH_MESSAGE,
 } from "../../../../../lib/payment-ledger"
 import { ucpErrorFor, ucpVersionFor, ucpWireFor } from "../../../../../lib/ucp-version"
 import { isAlreadyCompleted } from "../../../../../lib/client-errors"
@@ -21,6 +25,19 @@ import {
   isPrismProvider,
   type GuardFailure,
 } from "../../../../../lib/ucp-complete-guard"
+
+const SETTLEMENT_PENDING_MESSAGE = {
+  type: "info",
+  code: "settlement_pending",
+  content: "The payment is still settling. Retry the completion with the same payment credential.",
+}
+
+const PAYMENT_REVIEW_MESSAGE = {
+  type: "error",
+  code: "payment_requires_review",
+  content: "The payment needs a review by the merchant before the order can be placed.",
+  severity: "requires_buyer_review",
+}
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -175,7 +192,30 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     console.error(`[agentic-commerce] UCP checkout complete failed for ${id}: ${error instanceof Error ? error.message : String(error)}`)
-    // On payment failure, refresh payment state
+
+    if (isPaymentPendingMismatch(error)) {
+      res.status(409).json(ucpErrorFor(req, {
+        code: PAYMENT_PENDING_MISMATCH,
+        content: PAYMENT_PENDING_MISMATCH_MESSAGE,
+        severity: "recoverable",
+      }))
+      return
+    }
+
+    const marker = await agentSessions(req.scope).find(id).then((session) => session?.pending_settlement ?? null, () => null)
+    if (marker || isSettlementUnderReview(error)) {
+      const review = isSettlementUnderReview(error) || marker?.state === "review"
+      const cart = await fetchSessionCart(req.scope, id).catch(() => undefined)
+      const baseUrl = `${getPublicBaseUrl(req)}/ucp/checkout-sessions`
+      const session = cart ? agenticCommerceService.formatUcpCheckoutSession(cart, baseUrl, undefined, ucpVersion) : { id }
+      res.status(review ? 200 : 202).json({
+        ...session,
+        status: review ? "requires_escalation" : "complete_in_progress",
+        messages: [review ? PAYMENT_REVIEW_MESSAGE : SETTLEMENT_PENDING_MESSAGE],
+      })
+      return
+    }
+
     try {
       await refreshPaymentCollectionForCartWorkflow(req.scope).run({
         input: { cart_id: id },

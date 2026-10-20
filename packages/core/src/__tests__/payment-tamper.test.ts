@@ -4,6 +4,7 @@ import { fakeAgentSessions } from "./helpers/agent-session-store"
 import { extractSignedSummary } from "../lib/validate-signed-amount"
 import { paymentSessionDataFor } from "../workflows/steps/setup-payment"
 import { settledPaymentMetadata } from "../lib/settled-payment-record"
+import { credentialSha256 } from "../lib/credential-digest"
 
 const completeRun = vi.hoisted(() => vi.fn(async () => {
   throw new Error("stop after settlement handoff")
@@ -555,7 +556,7 @@ describe("payment session used to complete a UCP checkout", () => {
         id: "payses_settled",
         status: "authorized",
         provider_id: "pp_prism_prism",
-        data: { eip3009_authorization: pluginAuthorization, prism_tx_id: "0xsettled" },
+        data: { credential_sha256: credentialSha256(pluginAuthorization), prism_tx_id: "0xsettled" },
       },
       { id: "payses_buyer", status: "pending", provider_id: "pp_prism_prism", data: {} },
     ])

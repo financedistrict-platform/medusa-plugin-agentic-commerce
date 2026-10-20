@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import cancelCheckoutSessionWorkflow from "../../../../../workflows/cancel-checkout-session"
 import { formatAcpError, httpStatusToAcpType } from "../../../../../lib/error-formatters"
+import { sessionLockedCodeOf } from "../../../../../workflows/steps/assert-session-mutable"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -23,6 +24,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       capabilities: {},
     })
   } catch (error: any) {
+    const locked = sessionLockedCodeOf(error)
+    if (locked) {
+      res.status(409).json(formatAcpError({
+        type: "invalid_request",
+        code: locked,
+        message: error.message,
+        httpStatus: 409,
+      }))
+      return
+    }
     const statusCode = error.message?.includes("not found") ? 404
       : error.message?.includes("completed") ? 409
       : 500

@@ -33,9 +33,15 @@ export type AcpStatusOpts = {
   expired?: boolean
 }
 
+function settlementStateOf(cart: any): string | undefined {
+  return cart.agent_session?.pending_settlement?.state
+}
+
 export function resolveAcpStatus(cart: any, opts?: AcpStatusOpts): AcpStatus {
   if (isCanceled(cart.agent_session)) return "canceled"
   if (cart.completed_at) return "completed"
+  if (settlementStateOf(cart) === "settling" || settlementStateOf(cart) === "pending") return "complete_in_progress"
+  if (settlementStateOf(cart) === "review") return "requires_escalation"
   if (opts?.expired) return "expired"
   if (opts?.completeInProgress) return "complete_in_progress"
   if (opts?.pendingApproval) return "pending_approval"
@@ -66,6 +72,8 @@ export function resolveUcpStatus(
 ): UcpStatus {
   if (isCanceled(cart.agent_session)) return "canceled"
   if (cart.completed_at) return "completed"
+  if (settlementStateOf(cart) === "settling" || settlementStateOf(cart) === "pending") return "complete_in_progress"
+  if (settlementStateOf(cart) === "review") return "requires_escalation"
   if (opts?.completeInProgress) return "complete_in_progress"
   if (opts?.requiresEscalation) return "requires_escalation"
   if (cart.payment_collection?.status === "authorized") return "ready_for_complete"

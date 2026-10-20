@@ -91,6 +91,12 @@ function failed(data: Record<string, unknown>, error: string, settlementState: S
   }
 }
 
+const SETTLED_CREDENTIAL_CLEARED = {
+  eip3009_authorization: null,
+  x402_authorization: null,
+  settlement_resume: null,
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -223,7 +229,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
       const attempt = await this.settleWithPrism(binding, data.settlement_resume === true)
       if (attempt.state !== "settled") {
         return {
-          data: { ...data, ...unsettledData(attempt), settlement_state: attempt.state },
+          data: { ...data, ...unsettledData(attempt), ...SETTLED_CREDENTIAL_CLEARED, settlement_state: attempt.state },
           status: "error" as PaymentSessionStatus,
         }
       }
@@ -234,6 +240,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
           network: attempt.settled.network,
           payer: attempt.payer ?? eip3009.from,
           signed_value: eip3009.value,
+          ...SETTLED_CREDENTIAL_CLEARED,
           settlement_state: "settled",
         },
         status: "authorized" as PaymentSessionStatus,
@@ -294,6 +301,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
         data: {
           ...data,
           ...settledPaymentData(attempt.settled),
+          ...SETTLED_CREDENTIAL_CLEARED,
           captured: true,
         },
       }

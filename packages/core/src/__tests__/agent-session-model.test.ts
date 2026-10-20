@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, it, expect } from "vitest"
 import AgentSession from "../modules/agent-session/models/agent-session"
@@ -8,12 +8,16 @@ type Field = { nullable: boolean; indexes: { type: string }[]; dataType: { name:
 const MODULE = join(__dirname, "..", "modules", "agent-session")
 const migration = readFileSync(join(MODULE, "migrations", "Migration20261009120000.ts"), "utf8")
 const createTable = /create table if not exists "agent_session" \((.*?), constraint/.exec(migration)?.[1] ?? ""
+const addedColumns = readdirSync(join(MODULE, "migrations"))
+  .filter((file) => /^Migration\d+\.ts$/.test(file))
+  .map((file) => readFileSync(join(MODULE, "migrations", file), "utf8"))
+  .flatMap((source) => [...source.matchAll(/alter table "agent_session" add column if not exists ("\w+" \w+ (?:not null|null))/g)].map(([, column]) => column))
 
 const SQL_TYPES: Record<string, string> = { id: "text", text: "text", dateTime: "timestamptz", json: "jsonb" }
 
 function migratedColumns() {
   return Object.fromEntries(
-    [...createTable.matchAll(/"(\w+)" (\w+) (not null|null)/g)].map(([, name, type, nullability]) => [name, { type, nullable: nullability === "null" }]),
+    [...[createTable, ...addedColumns].join(", ").matchAll(/"(\w+)" (\w+) (not null|null)/g)].map(([, name, type, nullability]) => [name, { type, nullable: nullability === "null" }]),
   )
 }
 

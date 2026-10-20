@@ -6,6 +6,7 @@ import type {
 } from "@medusajs/framework/http"
 import { Modules } from "@medusajs/framework/utils"
 import { ucpErrorFor, ucpVersionFor, type UcpRequestLike } from "../../lib/ucp-version"
+import { SETTLEMENT_PENDING } from "../../lib/payment-ledger"
 
 const IDEMPOTENCY_TTL = 60 * 60 * 24 // 24 hours in seconds
 const PROCESSING_TTL = 60 // 1 minute lock while processing
@@ -16,6 +17,11 @@ type CachedResponse = {
   response_status?: number
   response_body?: unknown
   completed_at?: string
+}
+
+function answersOpenSettlement(status: number, body: unknown): boolean {
+  if (status === 202) return true
+  return status === 409 && typeof body === "object" && body !== null && (body as { code?: unknown }).code === SETTLEMENT_PENDING
 }
 
 function hashBody(body: unknown): string {
@@ -181,7 +187,7 @@ export function createIdempotencyMiddleware(options: {
     const originalJson = res.json.bind(res)
     res.json = function (body: unknown) {
       // Only cache successful responses (non-5xx)
-      if (res.statusCode < 500) {
+      if (res.statusCode < 500 && !answersOpenSettlement(res.statusCode, body)) {
         const completedEntry: CachedResponse = {
           status: "completed",
           body_hash: bodyHash,

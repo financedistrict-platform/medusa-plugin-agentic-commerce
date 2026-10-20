@@ -1,6 +1,7 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import cancelCheckoutSessionWorkflow from "../../../../../workflows/cancel-checkout-session"
 import { ucpErrorFor, ucpVersionFor } from "../../../../../lib/ucp-version"
+import { sessionLockedCodeOf } from "../../../../../workflows/steps/assert-session-mutable"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -23,6 +24,15 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       links: [],
     })
   } catch (error: any) {
+    const locked = sessionLockedCodeOf(error)
+    if (locked) {
+      res.status(409).json(ucpErrorFor(req, {
+        code: locked,
+        content: error.message,
+        severity: "recoverable",
+      }))
+      return
+    }
     const statusCode = error.message?.includes("not found") ? 404
       : error.message?.includes("completed") ? 409
       : 500
