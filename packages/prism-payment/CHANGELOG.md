@@ -1,5 +1,13 @@
 # @financedistrict/medusa-plugin-prism-payment
 
+## 1.1.7
+
+### Patch Changes
+
+- [#77](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/77) [`1fde896`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/1fde8968851a2f4530c9b9f5fed0e1f14d3687c7) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Keep a pending or unknown Prism settlement open under the cart lock: UCP answers 202 or 200 with the session, ACP answers 409, a retry with the same credential resumes, a different credential is refused, and update and cancel wait. Stores must run `npx medusa db:migrate`. A failure after the payment provider was called but before its answer was saved holds the payment for review, so the cart cannot be paid again with another credential.
+
+- [#77](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/pull/77) [`1fde896`](https://github.com/financedistrict-platform/medusa-plugin-agentic-commerce/commit/1fde8968851a2f4530c9b9f5fed0e1f14d3687c7) Thanks [@vu-remote-dev-fdt](https://github.com/vu-remote-dev-fdt)! - Accept x402 v2 only, classify every Prism settle reply as settled, pending, review or declined, bound the settle call to 60 seconds, and expire signed quotes after 900 seconds.
+
 ## 1.1.6
 
 ### Patch Changes
