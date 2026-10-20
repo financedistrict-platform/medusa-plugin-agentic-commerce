@@ -21,9 +21,9 @@ export function fakeAgentSessions(seeds: SessionSeed[] = []) {
     async find(cartId) {
       return rows.get(cartId) ?? null
     },
-    async open({ cartId, fingerprint, ucpVersion }) {
+    async open({ cartId, fingerprint, ucpVersion, webhookUrl }) {
       if (rows.has(cartId)) throw new Error(`session ${cartId} already exists`)
-      const record = sessionRecord({ cart_id: cartId, session_fingerprint: fingerprint, ucp_version: ucpVersion ?? null })
+      const record = sessionRecord({ cart_id: cartId, session_fingerprint: fingerprint, ucp_version: ucpVersion ?? null, agent_webhook_url: webhookUrl || null })
       rows.set(cartId, record)
       return record
     },

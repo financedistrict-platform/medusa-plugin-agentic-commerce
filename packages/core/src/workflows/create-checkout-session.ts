@@ -70,7 +70,6 @@ const createCheckoutSessionWorkflow = createWorkflow(
               .replace(/[\x00-\x1f\x7f]/g, "")
               .slice(0, 256),
             checkout_session_created_at: new Date().toISOString(),
-            ...(input.webhook_url ? { agent_webhook_url: input.webhook_url } : {}),
           },
           ...(address ? { shipping_address: address } : {}),
         }
@@ -90,6 +89,7 @@ const createCheckoutSessionWorkflow = createWorkflow(
         cart_id: cartId,
         fingerprint: input.session_fingerprint,
         ucp_version: input.ucp_version,
+        webhook_url: input.webhook_url,
       }))
     )
 

@@ -5,6 +5,7 @@ type OpenAgentSessionInput = {
   cart_id: string
   fingerprint: string
   ucp_version?: string
+  webhook_url?: string
 }
 
 export const openAgentSessionStep = createStep(
@@ -14,6 +15,7 @@ export const openAgentSessionStep = createStep(
       cartId: input.cart_id,
       fingerprint: input.fingerprint,
       ucpVersion: input.ucp_version,
+      webhookUrl: input.webhook_url,
     })
     return new StepResponse({ cart_id: input.cart_id }, input.cart_id)
   },
