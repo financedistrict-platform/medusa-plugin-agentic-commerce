@@ -10,7 +10,7 @@ import {
   type UcpHandlersDiscoveryResponse,
 } from "../../lib/prism-client"
 import { PRISM_HANDLER_ID } from "../prism-payment/types"
-import { hasValidQuoteSignature, paymentConfigFromCheckoutData, quoteSignatureFor } from "../../lib/quote-binding"
+import { hasValidQuoteSignature, isQuoteFresh, paymentConfigFromCheckoutData, quoteSignatureFor } from "../../lib/quote-binding"
 import { decimalAmount } from "../../lib/decimal-amount"
 
 export const PRISM_CHECKOUT_DATA_KEY = "prism_checkout_data"
@@ -23,6 +23,7 @@ type PrismCheckoutData = {
   preparedAmount: string
   preparedCurrency: string
   preparedResourceUrl: string
+  preparedAt: number
   quoteSignature?: string
 }
 
@@ -74,13 +75,15 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
     const resourceUrl = `${checkoutBaseUrl}/${cart.id}`
 
     const existing = input.stored as PrismCheckoutData | undefined
+    const nowSeconds = Math.floor(Date.now() / 1000)
     if (
       existing &&
       existing.preparedResourceUrl === resourceUrl &&
       decimalAmount(existing.preparedAmount) === amount &&
       existing.preparedCurrency === preparedCurrency &&
       (existing.ucp || existing.acp) &&
-      hasValidQuoteSignature(existing, this.client.getApiKey())
+      hasValidQuoteSignature(existing, this.client.getApiKey()) &&
+      isQuoteFresh(existing, nowSeconds)
     ) {
       return existing
     }
@@ -121,6 +124,7 @@ export default class PrismPaymentHandlerAdapter implements PaymentHandlerAdapter
       preparedAmount: amount,
       preparedCurrency,
       preparedResourceUrl: resourceUrl,
+      preparedAt: nowSeconds,
     }
     const quoteSignature = quoteSignatureFor(terms, this.client.getApiKey())
     if (!quoteSignature) {

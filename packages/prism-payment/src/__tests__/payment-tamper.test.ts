@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
-import { PrismClient } from "../lib/prism-client"
+import { PrismClient, PrismHttpError, isSupportedX402Version } from "../lib/prism-client"
+import settleFixture from "../__fixtures__/settle-replies.json"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
 import {
   ASSET,
@@ -15,6 +16,7 @@ import {
   quotedEntry,
   signedCheckoutData,
   unsignedCheckoutData,
+  nowSeconds,
 } from "./helpers/quoted-payment"
 import { quoteSignatureFor } from "../lib/quote-binding"
 
@@ -764,19 +766,39 @@ describe("Prism x402 version", () => {
 
   const request = (x402Version: unknown) => ({ x402Version, paymentPayload: {}, paymentRequirements: {} }) as any
 
-  it.each([[1], [2]])("reaches the Prism v%s endpoint", async (version) => {
+  it("reaches the Prism v2 endpoint", async () => {
     const prism = new PrismClient({ apiUrl: "https://gw.test", apiKey: "key" })
 
-    await prism.verifyPayment(request(version))
-    await prism.settlePayment(request(version))
+    await prism.verifyPayment(request(2))
+    await prism.settlePayment(request(2))
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      `https://gw.test/api/v${version}/payment/verify`,
-      `https://gw.test/api/v${version}/payment/settle`,
+      "https://gw.test/api/v2/payment/verify",
+      "https://gw.test/api/v2/payment/settle",
     ])
   })
 
+  it("does not support x402 version 1", () => {
+    expect(isSupportedX402Version(1)).toBe(false)
+    expect(isSupportedX402Version(2)).toBe(true)
+  })
+
+  it("refuses a stored quote for x402 version 1 before calling Prism", async () => {
+    const { provider, client } = makeProvider()
+    const unsigned = unsignedCheckoutData()
+    ;(unsigned.ucp["xyz.fd.prism_payment"][0].config as { x402Version: number }).x402Version = 1
+    const quote = { ...unsigned, quoteSignature: quoteSignatureFor(unsigned, QUOTE_SIGNING_KEY) }
+
+    const result = await provider.authorizePayment({ data: await sessionData(provider, credential(), CART_TOTAL, quote) } as any)
+
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
   it.each([
+    ["version 1", 1],
     ["a path segment", "2/../../admin"],
     ["a query string", "2?x=1"],
     ["a version Prism does not serve", 3],
@@ -1020,5 +1042,315 @@ describe("Prism provider settles a session only once", () => {
     } as any)
 
     expect((updated.data as Record<string, unknown>).payment_quote).toEqual(quote)
+  })
+})
+
+describe("Prism settle outcome on the payment session", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const quotedData = async (extra: Record<string, unknown> = {}, cred: unknown = credential()) => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { eip3009_authorization: encode(cred), x402_version: 2, prism_checkout_data: checkoutData, credential_sha256: "d1", ...extra },
+    } as any)
+    return initiated.data as Record<string, unknown>
+  }
+
+  const authorizeWith = async (extra: Record<string, unknown> = {}, cred?: unknown) =>
+    provider.authorizePayment({ data: await quotedData(extra, cred) } as any)
+
+  const replyRows = settleFixture.rows.filter((row) => row.http === 200)
+
+  it.each(replyRows)("records $first for a $name reply on a first attempt", async (row) => {
+    client.settlePayment.mockResolvedValue(row.body)
+
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: row.first, credential_sha256: "d1" })
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+    const transaction = (row.body as Record<string, unknown>).transaction
+    if (transaction) expect(result.data).toMatchObject({ unreconciled_transaction: transaction })
+  })
+
+  it.each(replyRows)("records $resume for a $name reply on a resume", async (row) => {
+    client.settlePayment.mockResolvedValue(row.body)
+
+    const result = await authorizeWith({ settlement_resume: true })
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: row.resume, credential_sha256: "d1" })
+  })
+
+  it.each([
+    ["a conflict answer", new PrismHttpError(409, "conflict"), "pending"],
+    ["a rate limit answer", new PrismHttpError(429, "slow down"), "pending"],
+    ["a server error answer", new PrismHttpError(503, "down"), "pending"],
+    ["a refused request", new PrismHttpError(400, "bad request"), "declined"],
+    ["a network failure", new Error("socket hang up"), "pending"],
+  ])("records the outcome of %s", async (_label, error, state) => {
+    client.settlePayment.mockRejectedValue(error)
+
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: state, credential_sha256: "d1" })
+  })
+
+  it("records a refused request on a resume as review", async () => {
+    client.settlePayment.mockRejectedValue(new PrismHttpError(400, "bad request"))
+
+    const result = await authorizeWith({ settlement_resume: true })
+
+    expect(result.data).toMatchObject({ settlement_state: "review" })
+  })
+
+  it("authorizes a settled reply and records it as settled", async () => {
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("authorized")
+    expect(result.data).toMatchObject({ settlement_state: "settled", prism_tx_id: "0xtx", credential_sha256: "d1" })
+  })
+
+  it("holds a settled reply that does not match the quote for review and keeps its transaction", async () => {
+    client.settlePayment.mockResolvedValue({ success: true, transaction: "0xmoved", network: "eip155:1" })
+
+    const result = await authorizeWith()
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: "review", unreconciled_transaction: "0xmoved" })
+    expect(result.data).not.toHaveProperty("prism_tx_id")
+  })
+
+  it("records a settled session that no longer matches its quote as review", async () => {
+    const settled = (await authorizeWith()).data as Record<string, unknown>
+
+    const again = await provider.authorizePayment({ data: { ...settled, settled_amount: "1" } } as any)
+
+    expect(again.status).toBe("error")
+    expect(again.data).toMatchObject({ settlement_state: "review", credential_sha256: "d1" })
+  })
+
+  it.each([
+    ["a missing credential", async (data: Record<string, unknown>) => {
+      const { eip3009_authorization: _dropped, ...rest } = data
+      return rest
+    }],
+    ["an undecodable credential", async (data: Record<string, unknown>) => ({ ...data, eip3009_authorization: "%%%" })],
+  ])("declines %s before calling Prism", async (_label, tamper) => {
+    const result = await provider.authorizePayment({ data: await tamper(await quotedData()) } as any)
+
+    expect(result.status).toBe("error")
+    expect(result.data).toMatchObject({ settlement_state: "declined", credential_sha256: "d1" })
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("declines a credential that does not match the quote before calling Prism", async () => {
+    const result = await authorizeWith({}, credential({ value: "1" }))
+
+    expect(result.data).toMatchObject({ settlement_state: "declined", credential_sha256: "d1" })
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["Prism says the payment is not valid", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockResolvedValue({ isValid: false })],
+    ["the verification call fails", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockRejectedValue(new Error("timeout"))],
+  ])("declines when %s", async (_label, arrange) => {
+    arrange(client)
+
+    const result = await authorizeWith()
+
+    expect(result.data).toMatchObject({ settlement_state: "declined", credential_sha256: "d1" })
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["Prism would say the payment is not valid", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockResolvedValue({ isValid: false })],
+    ["the verification call would fail", (mock: ReturnType<typeof makeProvider>["client"]) => mock.verifyPayment.mockRejectedValue(new Error("timeout"))],
+  ])("lets the settle answer decide a resume when %s", async (_label, arrange) => {
+    arrange(client)
+    client.settlePayment.mockResolvedValue({ success: false, errorReason: "authorization_consumed" })
+
+    const result = await authorizeWith({ settlement_resume: true })
+
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+    expect(result.data).toMatchObject({ settlement_state: "review", credential_sha256: "d1" })
+  })
+
+  it("keeps a manual capture flow unchanged: authorizes without settling and captures afterwards", async () => {
+    ;({ provider, client } = makeProvider({ auto_capture: false }))
+
+    const authorized = await authorizeWith()
+
+    expect(authorized.status).toBe("authorized")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+    expect(authorized.data).toHaveProperty("eip3009_authorization")
+    expect(authorized.data).toMatchObject({ credential_sha256: "d1" })
+
+    const captured = await provider.capturePayment({ data: authorized.data } as any)
+
+    expect(captured.data).toMatchObject({ captured: true, prism_tx_id: "0xtx" })
+  })
+
+  it.each([
+    ["the text true", "true"],
+    ["the number one", 1],
+  ])("does not take %s as a resume flag", async (_label, flag) => {
+    const data = await quotedData({ settlement_resume: flag })
+
+    expect(data).not.toHaveProperty("settlement_resume")
+  })
+
+  it("keeps a resume flag and a credential digest written by the checkout", async () => {
+    const data = await quotedData({ settlement_resume: true })
+
+    expect(data).toMatchObject({ settlement_resume: true, credential_sha256: "d1" })
+  })
+
+  it("drops a credential digest that is not a string", async () => {
+    const data = await quotedData({ credential_sha256: 123 })
+
+    expect(data).not.toHaveProperty("credential_sha256")
+  })
+
+  it("drops the resume flag on a session update and keeps the digest and the quote", async () => {
+    const data = await quotedData({ settlement_resume: true })
+
+    const updated = (await provider.updatePayment({ amount: CART_TOTAL, currency_code: "usd", data } as any)).data as Record<string, unknown>
+
+    expect(updated).not.toHaveProperty("settlement_resume")
+    expect(updated).toMatchObject({ credential_sha256: "d1", payment_quote: data.payment_quote })
+  })
+
+  it.each([
+    ["no quote", (data: Record<string, unknown>) => ({ ...data, payment_quote: undefined }), "missing_payment_quote"],
+    ["a quote with a wrong signature", (data: Record<string, unknown>) => ({ ...data, payment_quote: { ...(data.payment_quote as object), signature: "0".repeat(64) } }), "invalid_quote_signature"],
+  ])("does not let a resume flag pass %s", async (_label, tamper, error) => {
+    const data = await quotedData({ settlement_resume: true })
+
+    const result = await provider.authorizePayment({ data: tamper(data) } as any)
+
+    expect((result.data as Record<string, unknown>).error).toBe(error)
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+})
+
+describe("Prism quote lifetime", () => {
+  let provider: PrismPaymentProviderService
+  let client: ReturnType<typeof makeProvider>["client"]
+
+  beforeEach(() => {
+    ;({ provider, client } = makeProvider())
+  })
+
+  const authorizeQuote = async (quote: unknown, extra: Record<string, unknown> = {}, cred: unknown = credential()) => {
+    const initiated = await provider.initiatePayment({
+      amount: CART_TOTAL,
+      currency_code: "usd",
+      data: { eip3009_authorization: encode(cred), x402_version: 2, prism_checkout_data: quote, ...extra },
+    } as any)
+    return provider.authorizePayment({ data: initiated.data } as any)
+  }
+
+  const agedQuote = (seconds: number) => signedCheckoutData(QUOTE_SIGNING_KEY, undefined, nowSeconds() - seconds)
+
+  it("refuses a quote prepared more than 900 seconds ago", async () => {
+    const result = await authorizeQuote(agedQuote(901))
+
+    expect((result.data as Record<string, unknown>).error).toBe("quote_expired")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("accepts a quote prepared less than 900 seconds ago", async () => {
+    const result = await authorizeQuote(agedQuote(890))
+
+    expect(result.status).toBe("authorized")
+  })
+
+  it("lets a resumed settlement through with a quote older than 900 seconds", async () => {
+    const result = await authorizeQuote(agedQuote(901), { settlement_resume: true })
+
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("lets a resumed settlement through after the signed authorization expired", async () => {
+    const result = await authorizeQuote(checkoutData, { settlement_resume: true }, credential({ validBefore: "1" }))
+
+    expect(result.status).toBe("authorized")
+    expect(client.settlePayment).toHaveBeenCalledTimes(1)
+  })
+
+  it("still refuses an expired signed authorization on a first attempt", async () => {
+    const result = await authorizeQuote(checkoutData, {}, credential({ validBefore: "1" }))
+
+    expect((result.data as Record<string, unknown>).error).toBe("authorization_expired")
+    expect(client.settlePayment).not.toHaveBeenCalled()
+  })
+
+  it("still refuses an authorization that is not valid yet on a resume", async () => {
+    const later = String(nowSeconds() + 600)
+
+    const result = await authorizeQuote(checkoutData, { settlement_resume: true }, credential({ validAfter: later }))
+
+    expect((result.data as Record<string, unknown>).error).toBe("authorization_not_yet_valid")
+  })
+
+  it("refuses a stored quote that does not say when it was prepared", async () => {
+    const { preparedAt: _dropped, ...undated } = unsignedCheckoutData() as Record<string, unknown>
+    const signed = { ...undated, quoteSignature: quoteSignatureFor(undated as never, QUOTE_SIGNING_KEY) }
+
+    const result = await authorizeQuote(signed)
+
+    expect((result.data as Record<string, unknown>).error).toBe("missing_payment_quote")
+  })
+
+  it("refuses a quote whose preparation time was changed after signing", async () => {
+    const result = await authorizeQuote({ ...agedQuote(901), preparedAt: nowSeconds() })
+
+    expect((result.data as Record<string, unknown>).error).toBe("invalid_quote_signature")
+    expect(client.verifyPayment).not.toHaveBeenCalled()
+  })
+
+  it("records when the quote was prepared and prepares again once it is too old to pay", async () => {
+    const adapter = new PrismPaymentHandlerAdapter({}, { api_url: "https://gw.test", api_key: QUOTE_SIGNING_KEY })
+    const preparePayment = vi.fn().mockResolvedValue({ x402Version: 2, resource: { url: "x" }, accepts: [quotedEntry] })
+    ;(adapter as any).client = {
+      getApiUrl: () => "https://gw.test",
+      getApiKey: () => QUOTE_SIGNING_KEY,
+      fetchUcpHandlers: vi.fn().mockResolvedValue({ "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", spec: "s", schema: "s", config: {} }] }),
+      fetchAcpHandlers: vi.fn().mockResolvedValue([]),
+      preparePayment,
+    }
+    const prepare = (stored?: unknown) => adapter.prepareCheckoutPayment({
+      cart: { id: "cart_1", total: CART_TOTAL, currency_code: "usd", metadata: {} },
+      stored,
+      checkoutBaseUrl: "https://shop.test/ucp/checkout-sessions",
+      storeName: "Shop",
+      ucpVersion: "2026-04-08",
+      container: { resolve: () => ({}) },
+    } as any)
+
+    const fresh = await prepare()
+    expect(Math.abs((fresh?.preparedAt ?? 0) - nowSeconds())).toBeLessThanOrEqual(1)
+    expect(await prepare(fresh)).toEqual(fresh)
+    expect(preparePayment).toHaveBeenCalledTimes(1)
+
+    const renewed = await prepare(agedQuote(901))
+    expect(preparePayment).toHaveBeenCalledTimes(2)
+    expect(renewed?.preparedAt).toBeGreaterThan(nowSeconds() - 5)
   })
 })
