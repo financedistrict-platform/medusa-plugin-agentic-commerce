@@ -27,3 +27,23 @@ export function paymentLedger(scope: Resolver): PaymentLedgerStore {
   if (!store) throw new Error(`The ${AGENT_SESSION_MODULE} module is not registered`)
   return store
 }
+
+export const PAYMENT_PENDING_MISMATCH = "payment_pending_mismatch"
+
+export const PAYMENT_PENDING_MISMATCH_MESSAGE =
+  "A settlement for this checkout is still pending with another payment credential. Retry with the same credential."
+
+export function isPaymentPendingMismatch(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === PAYMENT_PENDING_MISMATCH
+}
+
+export const SETTLEMENT_PENDING = "settlement_pending"
+
+export const SETTLEMENT_UNDER_REVIEW = "settlement_under_review"
+
+export const SETTLEMENT_UNDER_REVIEW_MESSAGE =
+  "The payment for this checkout needs a review by the merchant before the order can be placed."
+
+export function isSettlementUnderReview(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === SETTLEMENT_UNDER_REVIEW
+}

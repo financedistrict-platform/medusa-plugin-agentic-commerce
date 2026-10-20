@@ -36,6 +36,7 @@ import { POST as ucpComplete } from "../api/ucp/checkout-sessions/[id]/complete/
 import { POST as acpComplete } from "../api/acp/checkout_sessions/[id]/complete/route"
 import { setupPaymentStep } from "../workflows/steps/setup-payment"
 import { validateCheckoutPrerequisitesStep } from "../workflows/steps/validate-checkout-prerequisites"
+import { sendAgentWebhook } from "../subscribers/lib/agent-webhook"
 
 const HANDLER_ID = "xyz.fd.prism_payment"
 const QUOTED_AMOUNT = "1500000"
@@ -238,13 +239,13 @@ describe("session ownership", () => {
   it("rejects another agent that rewrote the fingerprint in cart metadata to its own", async () => {
     const { passed, res } = await ownerCheck(agentB, { session_fingerprint: fingerprintOf(agentA) }, { session_fingerprint: fingerprintOf(agentB) })
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(404)
   })
 
   it("rejects another agent when the fingerprint was deleted from cart metadata", async () => {
     const { passed, res } = await ownerCheck(agentB, { session_fingerprint: fingerprintOf(agentA) }, {})
     expect(passed).toBe(false)
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(404)
   })
 
   it("rejects a cart that no agent opened a session for", async () => {
@@ -339,5 +340,49 @@ describe("reserved session keys", () => {
       .filter((file) => READS_RESERVED_KEY.test(readFileSync(file, "utf8")))
       .map((file) => relative(SRC, file).split(sep).join("/"))
     expect(offenders).toEqual([])
+  })
+})
+
+describe("agent webhook target", () => {
+  const AGENT_URL = "https://agent.example/hooks"
+
+  function webhookScope(sessionUrl: string | null) {
+    const sendWebhookEvent = vi.fn(async () => ({ status: 200, success: true }))
+    const graph = vi.fn(async ({ entity }: { entity: string }) => {
+      if (entity === "order") return { data: [{ id: "order_1", cart_id: "cart_1" }] }
+      if (entity === "order_cart") return { data: [{ cart_id: "cart_1" }] }
+      return { data: [{ id: "cart_1", metadata: { agent_webhook_url: "https://evil.test" } }] }
+    })
+    const services: Record<string, unknown> = {
+      query: { graph },
+      agenticCommerce: { sendWebhookEvent },
+      agenticCommerceSession: fakeAgentSessions([{ cart_id: "cart_1", agent_webhook_url: sessionUrl }]),
+      cart: { updateCarts: vi.fn(async () => undefined) },
+    }
+    return { container: { resolve: (name: string) => services[name] }, sendWebhookEvent }
+  }
+
+  const send = (container: { resolve: (name: string) => unknown }) =>
+    sendAgentWebhook({ container, orderId: "order_1", eventType: "order.created", buildPayload: () => ({ order_id: "order_1" }) })
+
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined)
+  })
+
+  it("sends the webhook to the URL stored on the agent session, not to a URL the buyer wrote into cart metadata", async () => {
+    const { container, sendWebhookEvent } = webhookScope(AGENT_URL)
+
+    await send(container)
+
+    expect(sendWebhookEvent).toHaveBeenCalledTimes(1)
+    expect(sendWebhookEvent).toHaveBeenCalledWith(expect.objectContaining({ url: AGENT_URL }))
+  })
+
+  it("sends no webhook when the agent session has no URL, even if the buyer wrote one into cart metadata", async () => {
+    const { container, sendWebhookEvent } = webhookScope(null)
+
+    await send(container)
+
+    expect(sendWebhookEvent).not.toHaveBeenCalled()
   })
 })

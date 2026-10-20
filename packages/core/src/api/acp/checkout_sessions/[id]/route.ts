@@ -4,6 +4,7 @@ import { fetchSessionCart } from "../../../../lib/agent-session"
 import { acpAddressToMedusa } from "../../../../lib/address-translator"
 import { formatAcpError } from "../../../../lib/error-formatters"
 import { respondAcpFailure } from "../../../../lib/client-errors"
+import { sessionLockedCodeOf } from "../../../../workflows/steps/assert-session-mutable"
 import { getPublicBaseUrl } from "../../../../lib/public-url"
 import { resolveRegionForAddressUpdate } from "../../../../lib/resolve-region"
 
@@ -134,6 +135,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     res.json(session)
   } catch (error: unknown) {
+    const locked = sessionLockedCodeOf(error)
+    if (locked) {
+      res.status(409).json(formatAcpError({
+        type: "invalid_request",
+        code: locked,
+        message: error instanceof Error ? error.message : locked,
+        httpStatus: 409,
+      }))
+      return
+    }
     respondAcpFailure(res, error)
   }
 }

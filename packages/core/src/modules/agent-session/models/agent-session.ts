@@ -7,6 +7,8 @@ const AgentSession = model.define("agent_session", {
   ucp_version: model.text().nullable(),
   canceled_at: model.dateTime().nullable(),
   handler_data: model.json().nullable(),
+  pending_settlement: model.json().nullable(),
+  agent_webhook_url: model.text().nullable(),
 })
 
 export default AgentSession

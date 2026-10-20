@@ -7,7 +7,14 @@ import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
 import { checkQuoteBinding, isPrismProvider, PRISM_UCP_HANDLER_ID } from "../../../../../lib/ucp-complete-guard"
 import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
 import { recordSettledPayment } from "../../../../../lib/settled-payment-record"
-import { isAuthorizationUsed, PAYMENT_AUTHORIZATION_USED } from "../../../../../lib/payment-ledger"
+import {
+  isAuthorizationUsed,
+  isPaymentPendingMismatch,
+  isSettlementUnderReview,
+  PAYMENT_AUTHORIZATION_USED,
+  PAYMENT_PENDING_MISMATCH,
+  SETTLEMENT_PENDING,
+} from "../../../../../lib/payment-ledger"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -98,7 +105,24 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     res.json(response)
   } catch (error: any) {
-    // On payment failure, refresh payment state so cart isn't stuck
+    const marker = await agentSessions(req.scope).find(id).then((session) => session?.pending_settlement ?? null, () => null)
+    if (error?.type !== "duplicate_error" && (isPaymentPendingMismatch(error) || isSettlementUnderReview(error) || marker)) {
+      const code = isPaymentPendingMismatch(error) ? PAYMENT_PENDING_MISMATCH
+        : isSettlementUnderReview(error) || marker?.state === "review" ? "payment_requires_review"
+        : SETTLEMENT_PENDING
+      res.status(409).json(formatAcpError({
+        type: "invalid_request",
+        code,
+        message: code === SETTLEMENT_PENDING
+          ? "The payment is still settling. Retry the completion with the same payment credential."
+          : code === "payment_requires_review"
+            ? "The payment needs a review by the merchant before the order can be placed."
+            : "A settlement for this checkout is still pending with another payment credential. Retry with the same credential.",
+        httpStatus: 409,
+      }))
+      return
+    }
+
     try {
       await refreshPaymentCollectionForCartWorkflow(req.scope).run({
         input: { cart_id: id },

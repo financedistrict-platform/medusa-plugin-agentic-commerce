@@ -22,18 +22,21 @@ export const QUOTE_SIGNING_KEY = "key"
 
 export const settledPayment = { transaction: "0xtx", network: NETWORK, asset: ASSET, amount: QUOTED_VALUE }
 
-export function unsignedCheckoutData(accepts: Record<string, unknown>[] = [quotedEntry]) {
+export const nowSeconds = () => Math.floor(Date.now() / 1000)
+
+export function unsignedCheckoutData(accepts: Record<string, unknown>[] = [quotedEntry], preparedAt: number = nowSeconds()) {
   return {
     ucp: { "xyz.fd.prism_payment": [{ id: "xyz.fd.prism_payment", version: "2026-04-08", config: { x402Version: 2, resource: { url: QUOTED_RESOURCE_URL }, accepts } }] },
     acp: null,
     preparedAmount: String(CART_TOTAL),
     preparedCurrency: "usd",
     preparedResourceUrl: QUOTED_RESOURCE_URL,
+    preparedAt,
   }
 }
 
-export function signedCheckoutData(signingKey: string = QUOTE_SIGNING_KEY, accepts?: Record<string, unknown>[]) {
-  const unsigned = unsignedCheckoutData(accepts)
+export function signedCheckoutData(signingKey: string = QUOTE_SIGNING_KEY, accepts?: Record<string, unknown>[], preparedAt?: number) {
+  const unsigned = unsignedCheckoutData(accepts, preparedAt)
   return { ...unsigned, quoteSignature: quoteSignatureFor(unsigned, signingKey) }
 }
 

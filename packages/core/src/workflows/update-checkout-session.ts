@@ -11,7 +11,11 @@ import {
   deleteLineItemsWorkflow,
   listShippingOptionsForCartWorkflow,
   addShippingMethodToCartWorkflow,
+  acquireLockStep,
+  releaseLockStep,
 } from "@medusajs/medusa/core-flows"
+import { assertSessionMutableStep } from "./steps/assert-session-mutable"
+import { CART_LOCK_TTL_SECONDS } from "./complete-checkout-session"
 
 type ItemUpdate = {
   variant_id?: string
@@ -38,6 +42,9 @@ type UpdateCheckoutSessionInput = {
 const updateCheckoutSessionWorkflow = createWorkflow(
   "update-checkout-session",
   (input: UpdateCheckoutSessionInput) => {
+    acquireLockStep({ key: input.cart_id, timeout: 30, ttl: CART_LOCK_TTL_SECONDS })
+    assertSessionMutableStep({ cart_id: input.cart_id })
+
     // Step 1: Update cart properties (email, shipping address, region)
     const hasCartUpdates = transform(input, (input) => {
       const email = input.buyer?.email || input.email
@@ -153,6 +160,8 @@ const updateCheckoutSessionWorkflow = createWorkflow(
         ),
       })
     })
+
+    releaseLockStep({ key: input.cart_id })
 
     return new WorkflowResponse(
       transform(input, (input) => ({ cart_id: input.cart_id }))

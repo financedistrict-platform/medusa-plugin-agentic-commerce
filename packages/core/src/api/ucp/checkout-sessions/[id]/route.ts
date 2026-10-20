@@ -8,6 +8,7 @@ import { listShippingOptionsSafe } from "../../../../lib/list-shipping-options"
 import { extractSelectedFulfillmentOptionId } from "../../../../lib/formatters/ucp-fulfillment"
 import { ucpErrorFor, ucpVersionFor } from "../../../../lib/ucp-version"
 import { respondUcpFailure } from "../../../../lib/client-errors"
+import { sessionLockedCodeOf } from "../../../../workflows/steps/assert-session-mutable"
 
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const { id } = req.params
@@ -137,6 +138,15 @@ export async function PUT(req: MedusaRequest, res: MedusaResponse) {
 
     res.json(session)
   } catch (error: unknown) {
+    const locked = sessionLockedCodeOf(error)
+    if (locked) {
+      res.status(409).json(ucpErrorFor(req, {
+        code: locked,
+        content: error instanceof Error ? error.message : locked,
+        severity: "recoverable",
+      }))
+      return
+    }
     respondUcpFailure(req, res, error)
   }
 }

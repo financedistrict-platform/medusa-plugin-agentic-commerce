@@ -7,6 +7,7 @@ import {
 import { checkoutTotalMismatch, PRISM_CHECKOUT_DATA_KEY } from "../../lib/checkout-total-binding"
 import { agentSessions, handlerDataOf, isCanceled } from "../../lib/agent-session"
 import { PRISM_UCP_HANDLER_ID } from "../../lib/ucp-complete-guard"
+import { credentialSha256 } from "../../lib/credential-digest"
 
 type SetupPaymentInput = {
   cart_id: string
@@ -23,16 +24,21 @@ type SetupPaymentInput = {
     token?: string
     [key: string]: unknown
   }
+  resumed?: boolean
 }
 
 export function paymentSessionDataFor(
-  input: Pick<SetupPaymentInput, "ucp_version" | "payment_data">,
+  input: Pick<SetupPaymentInput, "ucp_version" | "payment_data" | "resumed">,
   storedQuote: unknown,
 ): Record<string, unknown> {
   const sessionData: Record<string, unknown> = { ucp_version: input.ucp_version }
 
   if (input.payment_data?.eip3009_authorization) {
     sessionData.eip3009_authorization = input.payment_data.eip3009_authorization
+    sessionData.credential_sha256 = credentialSha256(input.payment_data.eip3009_authorization)
+    if (input.resumed === true) {
+      sessionData.settlement_resume = true
+    }
     if (input.payment_data.x402_version) {
       sessionData.x402_version = input.payment_data.x402_version
     }
@@ -52,14 +58,14 @@ export function paymentSessionDataFor(
   return sessionData
 }
 
-type ExistingPaymentSession = {
+export type ExistingPaymentSession = {
   id: string
   status?: string
   provider_id?: string
   data?: Record<string, unknown> | null
 }
 
-function isSettledWithSameCredential(
+export function isSettledWithSameCredential(
   session: ExistingPaymentSession,
   input: Pick<SetupPaymentInput, "payment_provider_id" | "payment_data">,
 ): boolean {
@@ -69,7 +75,7 @@ function isSettledWithSameCredential(
     session.provider_id === input.payment_provider_id &&
     typeof credential === "string" &&
     credential.length > 0 &&
-    session.data?.eip3009_authorization === credential &&
+    session.data?.credential_sha256 === credentialSha256(credential) &&
     typeof session.data?.prism_tx_id === "string" &&
     session.data.prism_tx_id.length > 0
   )

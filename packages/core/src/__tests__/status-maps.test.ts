@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { resolveUcpStatus, resolveAcpStatus, resolveMissingRequirements } from "../lib/status-maps"
+import { fetchSessionCart } from "../lib/agent-session"
 
 describe("resolveUcpStatus", () => {
   it("returns 'requires_escalation' when opts flag is set", () => {
@@ -146,5 +147,43 @@ describe("resolveMissingRequirements", () => {
       items: [{ id: "i1" }],
       shipping_address: { address_1: "123 Main St" },
     })).toEqual(["email"])
+  })
+})
+
+describe("status of a checkout with an open settlement", () => {
+  const ready = { items: [{ id: "i1" }], email: "a@b.c", shipping_address: { address_1: "x" } }
+  const withMarker = (state: string, extra: Record<string, unknown> = {}) => ({ ...ready, ...extra, agent_session: { canceled_at: null, pending_settlement: { state } } })
+
+  it.each([["settling"], ["pending"]])("is complete_in_progress while the settlement is %s", (state) => {
+    expect(resolveUcpStatus(withMarker(state))).toBe("complete_in_progress")
+    expect(resolveAcpStatus(withMarker(state))).toBe("complete_in_progress")
+  })
+
+  it("is requires_escalation while the settlement is held for review", () => {
+    expect(resolveUcpStatus(withMarker("review"))).toBe("requires_escalation")
+    expect(resolveAcpStatus(withMarker("review"))).toBe("requires_escalation")
+  })
+
+  it("stays completed when a marker is left after a paid order", () => {
+    expect(resolveUcpStatus(withMarker("settling", { completed_at: "2026-10-19T00:00:00Z" }))).toBe("completed")
+    expect(resolveAcpStatus(withMarker("review", { completed_at: "2026-10-19T00:00:00Z" }))).toBe("completed")
+  })
+
+  it("stays canceled when the session was canceled", () => {
+    const canceled = { ...ready, agent_session: { canceled_at: "2026-10-19T00:00:00Z", pending_settlement: { state: "pending" } } }
+    expect(resolveUcpStatus(canceled)).toBe("canceled")
+  })
+
+  it("loads the settlement marker with the cart of a session", async () => {
+    const pending = { state: "pending", credential_sha256: "d1", resumed: false, started_at: "t", updated_at: "t" }
+    const scope = {
+      resolve: (name: string) => name === "query"
+        ? { graph: async () => ({ data: [{ id: "cart_1" }] }) }
+        : { find: async () => ({ cart_id: "cart_1", canceled_at: null, pending_settlement: pending }) },
+    }
+
+    const cart = await fetchSessionCart(scope, "cart_1")
+
+    expect(cart?.agent_session?.pending_settlement).toEqual(pending)
   })
 })

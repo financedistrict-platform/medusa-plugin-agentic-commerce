@@ -10,8 +10,13 @@ type QuoteTerms = {
   preparedAmount: string
   preparedCurrency: string
   preparedResourceUrl: string
+  preparedAt: number
   accepts: QuotedRequirements[]
 }
+
+export const QUOTE_TTL_SECONDS = 900
+
+export type QuoteBindingOptions = { resume?: boolean }
 
 export type StoredQuote = QuoteTerms & { signature: string }
 
@@ -30,6 +35,7 @@ export type QuoteBindingError =
   | "authorization_expired"
   | "authorization_not_yet_valid"
   | "invalid_nonce"
+  | "quote_expired"
 
 export type SettlementError = "missing_transaction_hash" | "settled_network_mismatch" | "settled_amount_mismatch"
 
@@ -97,10 +103,13 @@ export function bindAuthorizationToQuote(
   nowSeconds: number,
   signingKey: string,
   allowedChains?: readonly string[],
+  opts: QuoteBindingOptions = {},
 ): QuoteBinding {
   const checked = quoteForSession(storedQuote, sessionAmount, sessionCurrency, signingKey)
   if (!checked.ok) return fail(checked.error)
   const quote = checked.quote
+  const resume = opts.resume === true
+  if (!resume && nowSeconds - quote.preparedAt > QUOTE_TTL_SECONDS) return fail("quote_expired")
 
   const signed = authorization.paymentPayload?.payload?.authorization
   if (!signed || !allNonEmpty(authorization.paymentPayload?.payload?.signature, signed.from, signed.to, signed.value, signed.validAfter, signed.validBefore, signed.nonce)) {
@@ -115,7 +124,8 @@ export function bindAuthorizationToQuote(
   if (!chainAllowed(requirements.network, allowedChains)) return fail("unsupported_chain")
   if (!sameAtomicValue(requirements.amount, signed.value)) return fail("amount_mismatch")
   if (!sameAddress(requirements.payTo, signed.to)) return fail("wrong_recipient")
-  if (!UNSIGNED_INTEGER.test(signed.validBefore) || Number(signed.validBefore) <= nowSeconds) return fail("authorization_expired")
+  if (!UNSIGNED_INTEGER.test(signed.validBefore)) return fail("authorization_expired")
+  if (!resume && Number(signed.validBefore) <= nowSeconds) return fail("authorization_expired")
   if (!UNSIGNED_INTEGER.test(signed.validAfter) || Number(signed.validAfter) > nowSeconds) return fail("authorization_not_yet_valid")
   if (!BYTES32_HEX.test(signed.nonce)) return fail("invalid_nonce")
 
@@ -234,6 +244,7 @@ function quoteTermsFromCheckoutData(checkoutData: unknown): QuoteTerms | null {
     preparedAmount: checkoutData.preparedAmount,
     preparedCurrency: checkoutData.preparedCurrency,
     preparedResourceUrl: checkoutData.preparedResourceUrl,
+    preparedAt: checkoutData.preparedAt,
     accepts: config.accepts,
   })
 }
@@ -246,8 +257,9 @@ export function asStoredQuote(value: unknown): StoredQuote | null {
 
 function asQuoteTerms(value: unknown): QuoteTerms | null {
   if (!isRecord(value)) return null
-  const { x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, accepts } = value
+  const { x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, preparedAt, accepts } = value
   if (!isSupportedX402Version(x402Version) || !allNonEmpty(preparedAmount, preparedCurrency, preparedResourceUrl) || !Array.isArray(accepts)) return null
+  if (typeof preparedAt !== "number" || !Number.isSafeInteger(preparedAt) || preparedAt <= 0) return null
   const entries = accepts.filter(isQuotedRequirements)
   if (entries.length === 0 || entries.length !== accepts.length) return null
   return {
@@ -255,14 +267,20 @@ function asQuoteTerms(value: unknown): QuoteTerms | null {
     preparedAmount: preparedAmount as string,
     preparedCurrency: preparedCurrency as string,
     preparedResourceUrl: preparedResourceUrl as string,
+    preparedAt,
     accepts: entries,
   }
 }
 
+export function isQuoteFresh(checkoutData: unknown, nowSeconds: number): boolean {
+  const terms = quoteTermsFromCheckoutData(checkoutData)
+  return terms !== null && nowSeconds - terms.preparedAt <= QUOTE_TTL_SECONDS
+}
+
 function sign(terms: QuoteTerms, signingKey: string): string {
-  const { x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, accepts } = terms
+  const { x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, preparedAt, accepts } = terms
   return createHmac("sha256", signingKey)
-    .update(canonicalJson({ x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, accepts }))
+    .update(canonicalJson({ x402Version, preparedAmount, preparedCurrency, preparedResourceUrl, preparedAt, accepts }))
     .digest("hex")
 }
 

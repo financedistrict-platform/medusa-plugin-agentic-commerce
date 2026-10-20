@@ -279,6 +279,31 @@ describe("UCP order reads", () => {
   })
 })
 
+describe.each([
+  ["/acp/checkout_sessions/:id", "/acp/checkout_sessions/cart_1"],
+  ["/acp/checkout_sessions/:id/complete", "/acp/checkout_sessions/cart_1/complete"],
+  ["/acp/checkout_sessions/:id/cancel", "/acp/checkout_sessions/cart_1/cancel"],
+])("ACP session ownership on %s", (matcher, path) => {
+  const keyA = { authorization: "Bearer key-a" }
+  const keyB = { authorization: "Bearer key-b" }
+  const fingerprintOf = (headers: Headers) => computeSessionFingerprint("acp", headers)!
+
+  it("lets the API key that opened the session through", async () => {
+    const { passed } = await ownerRun(matcher, keyA, fingerprintOf(keyA), path)
+    expect(passed).toBe(true)
+  })
+
+  it("answers another API key with the same 404 as a session that does not exist", async () => {
+    const foreign = await ownerRun(matcher, keyB, fingerprintOf(keyA), path)
+    const missing = await ownerRun(matcher, keyB, null, path)
+
+    expect(foreign.passed).toBe(false)
+    expect(foreign.res.statusCode).toBe(404)
+    expect(foreign.res.body).toEqual(missing.res.body)
+    expect(missing.res.statusCode).toBe(404)
+  })
+})
+
 describe("ACP order reads", () => {
   const matcher = "/acp/orders/:id"
   const keyA = { authorization: "Bearer key-a" }

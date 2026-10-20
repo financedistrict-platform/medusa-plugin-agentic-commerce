@@ -1,7 +1,9 @@
+import { agentSessions, findSessionOfOrder, type AgentSessionRecord } from "../../lib/agent-session"
+
 /**
  * Shared utility for sending agent webhook notifications from subscribers.
  *
- * Resolves order → cart → metadata.agent_webhook_url, sends the webhook,
+ * Resolves order → agent session → agent_webhook_url, sends the webhook,
  * and logs the delivery result to cart metadata.
  */
 
@@ -51,8 +53,15 @@ export async function sendAgentWebhook(params: SendAgentWebhookParams): Promise<
     return
   }
 
-  // 3. Check for webhook URL — bail if not an agent order
-  const webhookUrl = cart?.metadata?.agent_webhook_url
+  let session: AgentSessionRecord | null
+  try {
+    session = params.orderId ? await findSessionOfOrder(container, params.orderId) : await agentSessions(container).find(cartId)
+  } catch (error: unknown) {
+    console.warn(`[agent-webhook] Failed to fetch the agent session of cart ${cartId}:`, error instanceof Error ? error.message : String(error))
+    return
+  }
+
+  const webhookUrl = session?.agent_webhook_url
   if (!webhookUrl) return
 
   // 4. Build payload via callback
