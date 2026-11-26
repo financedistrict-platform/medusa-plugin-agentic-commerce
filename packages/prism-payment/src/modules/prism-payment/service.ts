@@ -28,7 +28,7 @@ import type {
   PrismVerifyResponse,
   SettledPayment,
 } from "./types"
-import { PRISM_HANDLER_ID, isX402Instrument } from "./types"
+import { isX402Instrument } from "./types"
 import { PrismClient, PrismHttpError, resolvePrismApiKey } from "../../lib/prism-client"
 import { classifySettleReply, type SettlementState } from "../../lib/settlement-outcome"
 import { PRISM_CHECKOUT_DATA_KEY } from "../prism-payment-handler/service"
@@ -40,23 +40,33 @@ import {
   storedQuoteFromCheckoutData,
   type QuotedRequirements,
 } from "../../lib/quote-binding"
+import { credentialSha256, currentCredentialHandoff } from "../../lib/credential-handoff"
+import {
+  prismSessionData,
+  recordedSettlement,
+  sessionBaseOf,
+  settledOutcome,
+  type PrismSessionBase,
+  type PrismSessionData,
+} from "./session-data"
 
 const MISSING_PAYMENT_AUTHORIZATION = "missing_payment_authorization"
+export const CREDENTIAL_HANDOFF_MISSING = "credential_handoff_missing"
+export const CREDENTIAL_HANDOFF_MISMATCH = "credential_handoff_mismatch"
+export const UNEXPECTED_RECORDED_SETTLEMENT = "unexpected_recorded_settlement"
+
+const REDACTED_REASON = "unreadable_reason"
+const MAX_REASON_LENGTH = 200
+const LONG_ENCODED_RUN = /[A-Za-z0-9+/=_-]{64,}/
+
+function safeReason(reason: string): string {
+  return reason.length > MAX_REASON_LENGTH || LONG_ENCODED_RUN.test(reason) ? REDACTED_REASON : reason
+}
 
 type SettlementTarget = {
   x402Version: number
   requirements: QuotedRequirements
   paymentPayload: Record<string, unknown>
-}
-
-function settledPaymentData(settled: SettledPayment) {
-  return {
-    transaction_reference: settled.transaction,
-    transaction_network: settled.network,
-    prism_tx_id: settled.transaction,
-    settled_amount: settled.amount,
-    settled_asset: settled.asset,
-  }
 }
 
 function manualRefundMessage(summary: PrismSettlementSummary | null): string {
@@ -76,29 +86,36 @@ type SettleAttempt =
   | { state: "settled"; payer?: string; settled: SettledPayment }
   | { state: Exclude<SettlementState, "settled">; error: string; reason?: string; transaction?: string }
 
-function unsettledData(attempt: Exclude<SettleAttempt, { state: "settled" }>) {
+function failed(base: PrismSessionBase, error: string, settlementState: SettlementState): AuthorizePaymentOutput {
   return {
-    error: attempt.error,
-    ...(attempt.reason ? { error_message: attempt.reason } : {}),
-    ...(attempt.transaction ? { unreconciled_transaction: attempt.transaction } : {}),
-  }
-}
-
-function failed(data: Record<string, unknown>, error: string, settlementState: SettlementState): AuthorizePaymentOutput {
-  return {
-    data: { ...data, error, settlement_state: settlementState },
+    data: prismSessionData(base, { error, settlement_state: settlementState }),
     status: "error" as PaymentSessionStatus,
   }
 }
 
-const SETTLED_CREDENTIAL_CLEARED = {
-  eip3009_authorization: null,
-  x402_authorization: null,
-  settlement_resume: null,
+function unsettled(base: PrismSessionBase, attempt: Exclude<SettleAttempt, { state: "settled" }>): AuthorizePaymentOutput {
+  return {
+    data: prismSessionData(base, {
+      error: attempt.error,
+      error_message: attempt.reason ?? null,
+      unreconciled_transaction: attempt.transaction ?? null,
+      settlement_state: attempt.state,
+    }),
+    status: "error" as PaymentSessionStatus,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function decodeAuthorization(credential: string): X402PaymentAuthorization | null {
+  try {
+    const decoded: unknown = JSON.parse(Buffer.from(credential, "base64").toString("utf-8"))
+    return isRecord(decoded) ? (decoded as X402PaymentAuthorization) : null
+  } catch {
+    return null
+  }
 }
 
 class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentConfig> {
@@ -107,7 +124,6 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   private client: PrismClient
   private supportedAssets: string[]
   private allowedChains: string[] | undefined
-  private autoCapture: boolean
   private verifyBeforeSettle: boolean
 
   constructor(cradle: Record<string, unknown>, config: PrismPaymentConfig) {
@@ -116,7 +132,6 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     this.client = new PrismClient({ apiUrl: config.api_url, apiKey: config.api_key })
     this.supportedAssets = config.supported_assets || ["usdc"]
     this.allowedChains = config.supported_chains
-    this.autoCapture = config.auto_capture !== false
     this.verifyBeforeSettle = config.verify_before_settle !== false
   }
 
@@ -125,6 +140,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     if (!resolvePrismApiKey(options.api_key)) {
       throw new Error("Prism payment provider requires api_key or the PRISM_API_KEY environment variable; without it every Prism payment is rejected")
     }
+    if (options.auto_capture === false) {
+      throw new Error("Prism payment provider settles while authorizing; auto_capture: false is not supported")
+    }
   }
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
@@ -132,130 +150,79 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     return { id: sessionId, data: this.sessionDataFrom(sessionId, input) }
   }
 
+  private sessionBase(data: Record<string, unknown>): PrismSessionBase {
+    return sessionBaseOf(data, { supportedAssets: this.supportedAssets, supportedChains: this.allowedChains })
+  }
+
   private sessionDataFrom(
     sessionId: string,
     input: Pick<InitiatePaymentInput, "amount" | "currency_code" | "data">,
-  ): Record<string, unknown> {
+  ): PrismSessionData {
     const inputData = (input.data || {}) as Record<string, unknown>
-
-    const data: Record<string, unknown> = {
+    const paymentQuote = storedQuoteFromCheckoutData(inputData[PRISM_CHECKOUT_DATA_KEY])
+    if (!paymentQuote && inputData[PRISM_CHECKOUT_DATA_KEY]) {
+      console.warn("[prism-payment] Stored Prism quote is unreadable or unsigned; authorization will be rejected")
+    }
+    return prismSessionData({
+      ...this.sessionBase(inputData),
       prism_session_id: sessionId,
       amount: input.amount,
       currency_code: input.currency_code,
-      supported_assets: this.supportedAssets,
-    }
-
-    if (inputData.eip3009_authorization) {
-      data.eip3009_authorization = inputData.eip3009_authorization
-    }
-    if (inputData.x402_version) {
-      data.x402_version = inputData.x402_version
-    }
-    if (inputData.instrument_type) {
-      data.instrument_type = inputData.instrument_type
-    }
-    if (inputData.ucp_version) {
-      data.ucp_version = inputData.ucp_version
-    }
-    if (typeof inputData.credential_sha256 === "string" && inputData.credential_sha256.length > 0) {
-      data.credential_sha256 = inputData.credential_sha256
-    }
-    if (inputData.settlement_resume === true) {
-      data.settlement_resume = true
-    }
-    if (this.allowedChains) {
-      data.supported_chains = this.allowedChains
-    }
-    const paymentQuote = storedQuoteFromCheckoutData(inputData[PRISM_CHECKOUT_DATA_KEY])
-    if (paymentQuote) {
-      data.payment_quote = paymentQuote
-    } else if (inputData[PRISM_CHECKOUT_DATA_KEY]) {
-      console.warn("[prism-payment] Stored Prism quote is unreadable or unsigned; authorization will be rejected")
-    }
-
-    return data
+      payment_quote: paymentQuote,
+    })
   }
 
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
     const data = (input.data || {}) as Record<string, unknown>
+    const base = this.sessionBase(data)
 
-    if (data.prism_tx_id) {
-      const mismatch = settledPaymentMismatch(data, this.client.getApiKey())
-      if (mismatch) return failed(data, mismatch, "review")
-      return { data: { ...data, settlement_state: "settled" }, status: "authorized" as PaymentSessionStatus }
+    const handoff = currentCredentialHandoff()
+    if (!handoff) return failed(base, CREDENTIAL_HANDOFF_MISSING, "declined")
+    if (!base.credential_sha256 || credentialSha256(handoff.credential) !== base.credential_sha256) {
+      return failed(base, CREDENTIAL_HANDOFF_MISMATCH, "declined")
     }
 
-    const authorizationB64 = data.eip3009_authorization as string | undefined
+    if (data.prism_tx_id) return failed(base, UNEXPECTED_RECORDED_SETTLEMENT, "review")
 
-    if (!authorizationB64) return failed(data, MISSING_PAYMENT_AUTHORIZATION, "declined")
+    const authorization = decodeAuthorization(handoff.credential)
+    if (!authorization) return failed(base, "invalid_authorization_format", "declined")
 
-    let authorization: X402PaymentAuthorization
-    try {
-      const decoded = Buffer.from(authorizationB64, "base64").toString("utf-8")
-      authorization = JSON.parse(decoded) as X402PaymentAuthorization
-    } catch (error) {
-      console.error("[prism-payment] Failed to decode authorization:", error)
-      return failed(data, "invalid_authorization_format", "declined")
+    if (base.instrument_type !== null && !isX402Instrument(base.instrument_type, authorization)) {
+      return failed(base, "invalid_instrument_type", "declined")
     }
 
-    if (data.instrument_type !== undefined && !isX402Instrument(data.instrument_type, authorization)) {
-      return failed(data, "invalid_instrument_type", "declined")
-    }
-
-    if (!authorization?.paymentPayload?.payload?.authorization) {
-      return failed(data, "missing_eip3009_fields", "declined")
+    if (!authorization.paymentPayload?.payload?.authorization) {
+      return failed(base, "missing_eip3009_fields", "declined")
     }
 
     const eip3009 = authorization.paymentPayload.payload.authorization
+    const resumed = handoff.settlementResume
 
-    const binding = this.bindToQuote(authorization, data)
-    if (!binding.ok) return failed(data, binding.error, "declined")
-    const network = binding.requirements.network.toLowerCase()
+    const binding = this.bindToQuote(authorization, base, resumed)
+    if (!binding.ok) return failed(base, binding.error, "declined")
 
-    if (this.verifyBeforeSettle && data.settlement_resume !== true) {
+    if (this.verifyBeforeSettle && !resumed) {
       try {
         const verifyResult = await this.verifyWithPrism(authorization, binding)
         if (!verifyResult.isValid) {
-          return failed(data, `prism_verification_failed: ${verifyResult.error ?? "unknown"}`, "declined")
+          return failed(base, `prism_verification_failed: ${safeReason(verifyResult.error ?? "unknown")}`, "declined")
         }
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "Unknown error"
+        const message = safeReason(error instanceof Error ? error.message : "Unknown error")
         console.error("[prism-payment] Prism verification failed:", message)
-        return failed(data, `prism_verification_error: ${message}`, "declined")
+        return failed(base, `prism_verification_error: ${message}`, "declined")
       }
     }
 
-    if (this.autoCapture) {
-      const attempt = await this.settleWithPrism(binding, data.settlement_resume === true)
-      if (attempt.state !== "settled") {
-        return {
-          data: { ...data, ...unsettledData(attempt), ...SETTLED_CREDENTIAL_CLEARED, settlement_state: attempt.state },
-          status: "error" as PaymentSessionStatus,
-        }
-      }
-      return {
-        data: {
-          ...data,
-          ...settledPaymentData(attempt.settled),
-          network: attempt.settled.network,
-          payer: attempt.payer ?? eip3009.from,
-          signed_value: eip3009.value,
-          ...SETTLED_CREDENTIAL_CLEARED,
-          settlement_state: "settled",
-        },
-        status: "authorized" as PaymentSessionStatus,
-      }
-    }
-
+    const attempt = await this.settleWithPrism(binding, resumed)
+    if (attempt.state !== "settled") return unsettled(base, attempt)
     return {
-      data: {
-        ...data,
-        x402_authorization: authorizationB64,
-        network,
-        payer: eip3009.from,
+      data: prismSessionData(base, {
+        ...settledOutcome(attempt.settled),
+        network: attempt.settled.network,
+        payer: attempt.payer ?? eip3009.from,
         signed_value: eip3009.value,
-        ...(this.verifyBeforeSettle ? { verified: true } : {}),
-      },
+      }),
       status: "authorized" as PaymentSessionStatus,
     }
   }
@@ -263,52 +230,15 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   async capturePayment(input: CapturePaymentInput): Promise<CapturePaymentOutput> {
     const data = (input.data || {}) as Record<string, unknown>
 
-    if (data.prism_tx_id) {
-      const mismatch = settledPaymentMismatch(data, this.client.getApiKey())
-      if (mismatch) {
-        console.error(`[prism-payment] Refusing to capture settlement ${String(data.prism_tx_id)}: ${mismatch}`)
-        throw new Error(`[prism-payment] Capture failed: ${mismatch}`)
-      }
-      return { data: { ...data, captured: true } }
-    }
-
-    const authorizationB64 = data.x402_authorization as string | undefined
-    if (!authorizationB64) {
+    if (!data.prism_tx_id) {
       throw new Error(`[prism-payment] Capture failed: ${MISSING_PAYMENT_AUTHORIZATION}`)
     }
-
-    try {
-      const authorization = JSON.parse(
-        Buffer.from(authorizationB64, "base64").toString("utf-8")
-      ) as X402PaymentAuthorization
-
-      const binding = this.bindToQuote(authorization, data)
-      if (!binding.ok) {
-        throw new Error(binding.error)
-      }
-
-      const attempt = await this.settleWithPrism(binding, false)
-      if (attempt.state !== "settled") {
-        if (attempt.transaction) {
-          console.error(`[prism-payment] Settlement reported transaction ${attempt.transaction} that does not match the quote: ${attempt.reason ?? attempt.error}`)
-        }
-        throw new Error(
-          `Settlement failed: ${attempt.reason ?? attempt.error}${attempt.transaction ? ` (transaction ${attempt.transaction})` : ""}`
-        )
-      }
-
-      return {
-        data: {
-          ...data,
-          ...settledPaymentData(attempt.settled),
-          ...SETTLED_CREDENTIAL_CLEARED,
-          captured: true,
-        },
-      }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
-      throw new Error(`[prism-payment] Capture failed: ${message}`)
+    const mismatch = settledPaymentMismatch(data, this.client.getApiKey())
+    if (mismatch) {
+      console.error(`[prism-payment] Refusing to capture settlement ${String(data.prism_tx_id)}: ${mismatch}`)
+      throw new Error(`[prism-payment] Capture failed: ${mismatch}`)
     }
+    return { data: prismSessionData(this.sessionBase(data), { ...recordedSettlement(data), captured: true }) }
   }
 
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
@@ -339,9 +269,8 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     const inputData = (input.data || {}) as Record<string, unknown>
     const sessionId = typeof inputData.prism_session_id === "string" ? inputData.prism_session_id : crypto.randomUUID()
-    const { settlement_resume: _resume, ...data } = this.sessionDataFrom(sessionId, input)
-    const keptQuote = data.payment_quote ?? asStoredQuote(inputData.payment_quote)
-    return { data: keptQuote ? { ...data, payment_quote: keptQuote } : data }
+    const data = this.sessionDataFrom(sessionId, input)
+    return { data: { ...data, payment_quote: data.payment_quote ?? asStoredQuote(inputData.payment_quote) } }
   }
 
   async getPaymentStatus(input: GetPaymentStatusInput): Promise<GetPaymentStatusOutput> {
@@ -350,7 +279,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     if (data.error) return { data, status: "error" as PaymentSessionStatus }
     if (data.captured === true) return { data, status: "captured" as PaymentSessionStatus }
     if (data.canceled) return { data, status: "canceled" as PaymentSessionStatus }
-    if (data.prism_tx_id || data.verified || data.x402_authorization) return { data, status: "authorized" as PaymentSessionStatus }
+    if (data.prism_tx_id) return { data, status: "authorized" as PaymentSessionStatus }
 
     return { data, status: "pending" as PaymentSessionStatus }
   }
@@ -361,16 +290,16 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     return { action: "not_supported" }
   }
 
-  private bindToQuote(authorization: X402PaymentAuthorization, data: Record<string, unknown>) {
+  private bindToQuote(authorization: X402PaymentAuthorization, base: PrismSessionBase, resumed: boolean) {
     return bindAuthorizationToQuote(
       authorization,
-      data.payment_quote,
-      data.amount,
-      data.currency_code,
+      base.payment_quote,
+      base.amount,
+      base.currency_code,
       Math.floor(Date.now() / 1000),
       this.client.getApiKey(),
       this.allowedChains,
-      { resume: data.settlement_resume === true },
+      { resume: resumed },
     )
   }
 
@@ -404,7 +333,7 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     try {
       raw = await this.client.settlePayment(this.paymentRequest(target))
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error"
+      const message = safeReason(error instanceof Error ? error.message : "Unknown error")
       console.error("[prism-payment] Settlement failed:", message)
       const status = error instanceof PrismHttpError ? error.status : 0
       const state = classifySettleReply(status, null, resumed)
@@ -424,8 +353,9 @@ class PrismPaymentProviderService extends AbstractPaymentProvider<PrismPaymentCo
     const state = classifySettleReply(200, raw, resumed)
 
     if (state !== "settled") {
-      const reason = pickString("errorReason", "errorMessage", "errorCode")
-        ?? (reply.success === true ? "missing_transaction_hash" : "settlement_not_confirmed")
+      const reported = pickString("errorReason", "errorMessage", "errorCode")
+      const reason = reported !== undefined ? safeReason(reported)
+        : reply.success === true ? "missing_transaction_hash" : "settlement_not_confirmed"
       return { state, error: `settlement_failed: ${reason}`, reason, transaction }
     }
     const reconciled = reconcileSettlement(target.requirements, {

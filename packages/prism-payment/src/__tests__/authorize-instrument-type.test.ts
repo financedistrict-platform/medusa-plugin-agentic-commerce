@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { authorizeWithHandoff } from "./helpers/credential-handoff"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
 import { isX402Instrument } from "../modules/prism-payment/types"
 import { credential as quotedCredential, encode, quotedSession, settledPayment } from "./helpers/quoted-payment"
@@ -37,7 +38,7 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
   })
 
   it("settles an x402 instrument", async () => {
-    const result = await provider.authorizePayment({
+    const result = await authorizeWithHandoff(provider, {
       data: { eip3009_authorization: encode(credential), instrument_type: "x402", ucp_version: "2026-01-23", ...quotedSession() },
     } as any)
     expect(result.status).toBe("authorized")
@@ -48,7 +49,7 @@ describe("PrismPaymentProviderService.authorizePayment instrument type", () => {
     ["instrument type card", "card", credential],
     ["credential type tokenized", "x402", { ...credential, type: "tokenized" }],
   ])("rejects %s before settling", async (_label, instrumentType, cred) => {
-    const result = await provider.authorizePayment({
+    const result = await authorizeWithHandoff(provider, {
       data: { eip3009_authorization: encode(cred), instrument_type: instrumentType, ucp_version: "2026-01-23" },
     } as any)
     expect(result.status).toBe("error")

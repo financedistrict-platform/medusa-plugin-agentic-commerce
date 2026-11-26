@@ -8,6 +8,12 @@ describe("Prism provider options", () => {
     vi.unstubAllEnvs()
   })
 
+  it("refuses to start when auto_capture is turned off, since the provider settles while authorizing", () => {
+    expect(() => PrismPaymentProviderService.validateOptions({ api_url: "https://gw.test", api_key: "key", auto_capture: false })).toThrow(/auto_capture/)
+    expect(() => PrismPaymentProviderService.validateOptions({ api_url: "https://gw.test", api_key: "key", auto_capture: true })).not.toThrow()
+    expect(() => PrismPaymentProviderService.validateOptions({ api_url: "https://gw.test", api_key: "key" })).not.toThrow()
+  })
+
   it("refuses to start without an API key in the options or the environment", () => {
     vi.stubEnv("PRISM_API_KEY", "")
 
