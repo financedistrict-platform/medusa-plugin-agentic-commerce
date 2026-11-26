@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { authorizeWithHandoff } from "./helpers/credential-handoff"
 import PrismPaymentProviderService from "../modules/prism-payment/service"
 import { credential as quotedCredential, encode, quotedSession, settledPayment } from "./helpers/quoted-payment"
 
@@ -21,7 +22,7 @@ describe("PrismPaymentProviderService original-era instruments", () => {
   })
 
   const authorize = (data: Record<string, unknown>) =>
-    provider.authorizePayment({ data: { ucp_version: "2026-01-23", ...quotedSession(), ...data } } as any)
+    authorizeWithHandoff(provider, { data: { ucp_version: "2026-01-23", ...quotedSession(), ...data } } as any)
 
   it.each([
     ["instrument type tokenized", { instrument_type: "tokenized" }, credential],

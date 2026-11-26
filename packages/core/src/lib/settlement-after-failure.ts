@@ -20,7 +20,7 @@ export function settlementAfterFailure(
   if (!marker.credential_sha256) return { kind: "clear" }
 
   const sessionData = session?.data
-  const state = sessionData?.settlement_state
+  const state = sessionData?.settlement_state ?? undefined
   if (state === undefined) {
     const kept = nonEmpty(marker.transaction)
     if (marker.provider_called_at) return { kind: "review", ...(kept ? { transaction: kept } : {}), reason: PROVIDER_CALLED_OUTCOME_UNSAVED }

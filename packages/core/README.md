@@ -299,7 +299,7 @@ The plugin provides four reusable workflows that orchestrate the checkout proces
 |----------|-------------|
 | `createCheckoutSessionWorkflow` | Validates cart, resolves region, prepares payment |
 | `updateCheckoutSessionWorkflow` | Handles item/address changes, re-prepares payment |
-| `completeCheckoutSessionWorkflow` | Completes payment, creates order |
+| `completeCheckoutSessionWorkflow` | Completes payment, creates order. Its input carries only a credential digest; the complete routes hand the credential to the payment provider in memory, so a direct run is declined by the Prism provider |
 | `cancelCheckoutSessionWorkflow` | Cancels session and releases resources |
 
 Import them in your custom code:
@@ -332,7 +332,9 @@ import {
 
 An unknown version or negotiation value stops the store at boot. So does a missing `payment_provider_id`, or the system provider outside the local-testing case above.
 
-Medusa's own `/store/carts/:id/complete` and any other caller of `completeCartWorkflow` cannot complete an agent cart: a validate hook lets it complete only inside the plugin's checkout completion. Medusa allows one handler per workflow hook, so a store that registers its own `completeCartWorkflow.hooks.validate` fails at boot with this plugin; move that check to another hook or step. The hook also runs for a cart that already has an order, so a repeated native complete of an agent cart answers `agent_checkout_required`.
+Medusa's own `/store/carts/:id/complete` and any other caller of `completeCartWorkflow` cannot complete an agent cart: a validate hook lets it complete only inside the plugin's checkout completion. Medusa allows one handler per workflow hook, so a store that registers its own `completeCartWorkflow.hooks.validate` fails at boot with this plugin; move that check to another hook or step. The hook also runs for a cart that already has an order, so a repeated native complete of an agent cart answers `agent_checkout_required`. A cart with no agent session is refused the same way when it holds a Prism payment session.
+
+The complete routes never store the payment credential. They parse it once, keep only its SHA-256 digest and signed summary in workflow input and payment-session data, and hand the credential to the payment provider for the one request. This version needs `@financedistrict/medusa-plugin-prism-payment` 1.1.8 or later.
 
 The plugin records on the agent session that the payment provider is about to be called, through the `beforePaymentAuthorization` hook of `completeCartWorkflow`. A failure after that point holds the payment for review instead of freeing the cart for another credential. Medusa allows one handler per workflow hook, so a store or another plugin that registers its own `beforePaymentAuthorization` handler fails at boot with this plugin.
 

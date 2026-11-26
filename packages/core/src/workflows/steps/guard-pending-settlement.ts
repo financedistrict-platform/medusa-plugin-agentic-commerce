@@ -1,7 +1,7 @@
 import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { MedusaError } from "@medusajs/framework/utils"
 import { agentSessions } from "../../lib/agent-session"
-import { credentialSha256 } from "../../lib/credential-digest"
+import { markSettlementResume } from "../../lib/credential-handoff"
 import {
   PAYMENT_PENDING_MISMATCH,
   PAYMENT_PENDING_MISMATCH_MESSAGE,
@@ -11,14 +11,14 @@ import {
 
 export type GuardPendingSettlementInput = {
   cart_id: string
-  payment_data?: { eip3009_authorization?: string }
+  payment_data?: { credential_sha256?: string | null }
 }
 
 type Resolver = { resolve: (name: string) => unknown }
 
 export function credentialDigestOf(paymentData: GuardPendingSettlementInput["payment_data"]): string | null {
-  const credential = paymentData?.eip3009_authorization
-  return typeof credential === "string" && credential.length > 0 ? credentialSha256(credential) : null
+  const digest = paymentData?.credential_sha256
+  return typeof digest === "string" && digest.length > 0 ? digest : null
 }
 
 export async function guardPendingSettlement(input: GuardPendingSettlementInput, container: Resolver): Promise<{ resumed: boolean }> {
@@ -35,5 +35,9 @@ export async function guardPendingSettlement(input: GuardPendingSettlementInput,
 
 export const guardPendingSettlementStep = createStep(
   "guard-pending-settlement",
-  async (input: GuardPendingSettlementInput, { container }) => new StepResponse(await guardPendingSettlement(input, container)),
+  async (input: GuardPendingSettlementInput, { container }) => {
+    const settlement = await guardPendingSettlement(input, container)
+    markSettlementResume(settlement.resumed)
+    return new StepResponse(settlement)
+  },
 )

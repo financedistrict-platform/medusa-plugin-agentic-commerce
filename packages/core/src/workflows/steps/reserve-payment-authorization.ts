@@ -2,12 +2,12 @@ import { createStep, StepResponse } from "@medusajs/framework/workflows-sdk"
 import { MedusaError } from "@medusajs/framework/utils"
 import { PAYMENT_AUTHORIZATION_USED, PAYMENT_AUTHORIZATION_USED_MESSAGE, paymentLedger } from "../../lib/payment-ledger"
 import { isPrismProvider } from "../../lib/ucp-complete-guard"
-import { extractSignedSummary } from "../../lib/validate-signed-amount"
+import type { SignedPaymentSummary } from "../../lib/validate-signed-amount"
 
 type ReservePaymentAuthorizationInput = {
   cart_id: string
   payment_provider_id: string
-  payment_data?: { eip3009_authorization?: string }
+  payment_data?: { signed_summary?: SignedPaymentSummary | null }
 }
 
 export const reservePaymentAuthorizationStep = createStep(
@@ -17,8 +17,7 @@ export const reservePaymentAuthorizationStep = createStep(
       return new StepResponse({ cart_id: input.cart_id })
     }
 
-    const authorization = input.payment_data?.eip3009_authorization
-    const summary = authorization ? extractSignedSummary(authorization) : null
+    const summary = input.payment_data?.signed_summary
     if (!summary) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,

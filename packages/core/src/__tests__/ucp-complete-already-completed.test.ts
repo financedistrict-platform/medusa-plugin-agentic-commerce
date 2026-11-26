@@ -163,7 +163,7 @@ describe("completing a UCP session whose settlement is still open", () => {
     const middleware = createIdempotencyMiddleware({ required: true, protocol: "ucp" })
 
     function failSettleWith(sessionData: Record<string, unknown> | null) {
-      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { eip3009_authorization: string } } }) => {
+      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { credential_sha256: string } } }) => {
         const settlement = await guardPendingSettlement(input, container)
         const attempt = await beginSettlementAttempt({ ...input, resumed: settlement.resumed }, container)
         paymentSessions = sessionData ? [{ id: "ps_1", data: { credential_sha256: attempt.credential_sha256, ...sessionData } }] : []
@@ -173,7 +173,7 @@ describe("completing a UCP session whose settlement is still open", () => {
     }
 
     function failAfterProviderCalled() {
-      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { eip3009_authorization: string } } }) => {
+      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { credential_sha256: string } } }) => {
         const settlement = await guardPendingSettlement(input, container)
         const attempt = await beginSettlementAttempt({ ...input, resumed: settlement.resumed }, container)
         await markProviderCalled(input.cart_id, container)
@@ -184,7 +184,7 @@ describe("completing a UCP session whose settlement is still open", () => {
     }
 
     function guardOnly() {
-      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { eip3009_authorization: string } } }) => {
+      completeRun.mockImplementationOnce(async ({ input }: { input: { cart_id: string; payment_data: { credential_sha256: string } } }) => {
         await guardPendingSettlement(input, container)
         throw new Error("the guard let a new credential through")
       })

@@ -84,7 +84,7 @@ function containerWith(sessions: ReturnType<typeof fakeAgentSessions>, services:
 describe("a retried completion while a settlement is open", () => {
   const guard = (marker: PendingSettlementRecord | null, credential?: string) =>
     guardPendingSettlement(
-      { cart_id: "cart_1", payment_data: credential ? { eip3009_authorization: credential } : undefined },
+      { cart_id: "cart_1", payment_data: credential ? { credential_sha256: credentialSha256(credential) } : undefined },
       containerWith(fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: marker }])),
     )
 
@@ -112,37 +112,40 @@ describe("a retried completion while a settlement is open", () => {
 })
 
 describe("payment session data written by the checkout", () => {
-  it("writes the credential digest and a resume flag only from the server decision", () => {
-    const fresh = paymentSessionDataFor({ ucp_version: "2026-04-08", payment_data: { eip3009_authorization: CREDENTIAL, settlement_resume: true } }, undefined)
-    const resumed = paymentSessionDataFor({ ucp_version: "2026-04-08", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: true }, undefined)
+  it("writes the credential digest and never the credential, a token or a resume flag", () => {
+    const written = paymentSessionDataFor(
+      { ucp_version: "2026-04-08", payment_data: { credential_sha256: credentialSha256(CREDENTIAL), x402_version: 2, instrument_type: "x402" } },
+      undefined,
+    )
 
-    expect(fresh.credential_sha256).toBe(credentialSha256(CREDENTIAL))
-    expect(fresh).not.toHaveProperty("settlement_resume")
-    expect(resumed).toMatchObject({ credential_sha256: credentialSha256(CREDENTIAL), settlement_resume: true })
+    expect(written).toEqual({ ucp_version: "2026-04-08", credential_sha256: credentialSha256(CREDENTIAL), x402_version: 2, instrument_type: "x402" })
+    expect(JSON.stringify(written)).not.toContain(CREDENTIAL)
   })
 
   it("recognizes a session settled with the same credential by its digest alone", () => {
     const session = { id: "ps_1", status: "authorized", provider_id: "pp_prism_prism", data: { credential_sha256: credentialSha256(CREDENTIAL), prism_tx_id: "0xtx" } }
 
-    expect(isSettledWithSameCredential(session, { payment_provider_id: "pp_prism_prism", payment_data: { eip3009_authorization: CREDENTIAL } })).toBe(true)
-    expect(isSettledWithSameCredential(session, { payment_provider_id: "pp_prism_prism", payment_data: { eip3009_authorization: OTHER_CREDENTIAL } })).toBe(false)
+    expect(isSettledWithSameCredential(session, { payment_provider_id: "pp_prism_prism", payment_data: { credential_sha256: credentialSha256(CREDENTIAL) } })).toBe(true)
+    expect(isSettledWithSameCredential(session, { payment_provider_id: "pp_prism_prism", payment_data: { credential_sha256: credentialSha256(OTHER_CREDENTIAL) } })).toBe(false)
   })
 
   it("computes one digest for the guard, the session data and the provider result", async () => {
-    const sessionData = paymentSessionDataFor({ ucp_version: "2026-04-08", payment_data: { eip3009_authorization: CREDENTIAL } }, undefined)
+    const sessionData = paymentSessionDataFor({ ucp_version: "2026-04-08", payment_data: { credential_sha256: credentialSha256(CREDENTIAL) } }, undefined)
     const authorizePayment = async ({ data }: { data: Record<string, unknown> }) => ({ data, status: "error" })
     const provided = await authorizePayment({ data: sessionData })
 
     expect(await guardPendingSettlement(
-      { cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL } },
+      { cart_id: "cart_1", payment_data: { credential_sha256: credentialSha256(CREDENTIAL) } },
       containerWith(fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ credential_sha256: provided.data.credential_sha256 as string }) }])),
     )).toEqual({ resumed: true })
   })
 
-  it("gives a legacy token the same digest as the authorization it is mapped to", () => {
-    const mapped = completionPaymentData({ cart_id: "cart_1", payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08", payment_data: { token: CREDENTIAL } })
+  it("passes only the digest and the signed summary of the credential to the workflow steps", () => {
+    const smuggled = { credential_sha256: credentialSha256(CREDENTIAL), signed_summary: null, eip3009_authorization: CREDENTIAL, token: CREDENTIAL }
+    const mapped = completionPaymentData({ cart_id: "cart_1", payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08", payment_data: smuggled })
 
-    expect(paymentSessionDataFor(mapped, undefined).credential_sha256).toBe(credentialSha256(CREDENTIAL))
+    expect(mapped.payment_data).toEqual({ credential_sha256: credentialSha256(CREDENTIAL), signed_summary: null, x402_version: undefined, handler_id: undefined, instrument_type: undefined })
+    expect(JSON.stringify(paymentSessionDataFor(mapped, undefined))).not.toContain(CREDENTIAL)
   })
 })
 
@@ -152,7 +155,7 @@ describe("the settlement marker around the cart completion", () => {
   it("marks a credential payment as settling with its digest", async () => {
     const sessions = fakeAgentSessions([{ cart_id: "cart_1" }])
 
-    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: false }, containerWith(sessions), NOW)
+    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { credential_sha256: credentialSha256(CREDENTIAL) }, resumed: false }, containerWith(sessions), NOW)
 
     expect(sessions.rows.get("cart_1")?.pending_settlement).toEqual({
       state: "settling",
@@ -177,7 +180,7 @@ describe("the settlement marker around the cart completion", () => {
   it("keeps the transaction of an earlier attempt when a resume starts", async () => {
     const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ transaction: "0xaa" }) }])
 
-    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: true }, containerWith(sessions), NOW)
+    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { credential_sha256: credentialSha256(CREDENTIAL) }, resumed: true }, containerWith(sessions), NOW)
 
     expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", resumed: true, transaction: "0xaa" })
   })
@@ -239,7 +242,7 @@ describe("the settlement marker around the cart completion", () => {
   it("starts every attempt without a recorded provider call", async () => {
     const sessions = fakeAgentSessions([{ cart_id: "cart_1", pending_settlement: pendingMarker({ provider_called_at: "2026-10-19T00:00:01.000Z" }) }])
 
-    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { eip3009_authorization: CREDENTIAL }, resumed: true }, containerWith(sessions), NOW)
+    await beginSettlementAttempt({ cart_id: "cart_1", payment_data: { credential_sha256: credentialSha256(CREDENTIAL) }, resumed: true }, containerWith(sessions), NOW)
 
     expect(sessions.rows.get("cart_1")?.pending_settlement).toMatchObject({ state: "settling", provider_called_at: null })
   })

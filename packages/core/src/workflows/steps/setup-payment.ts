@@ -7,48 +7,34 @@ import {
 import { checkoutTotalMismatch, PRISM_CHECKOUT_DATA_KEY } from "../../lib/checkout-total-binding"
 import { agentSessions, handlerDataOf, isCanceled } from "../../lib/agent-session"
 import { PRISM_UCP_HANDLER_ID } from "../../lib/ucp-complete-guard"
-import { credentialSha256 } from "../../lib/credential-digest"
 
 type SetupPaymentInput = {
   cart_id: string
   payment_provider_id: string
   ucp_version: string
   payment_data?: {
-    /** Base64-encoded x402 PaymentAuthorizationResult */
-    eip3009_authorization?: string
-    /** x402 protocol version */
+    credential_sha256?: string
     x402_version?: number
-    /** Payment handler ID */
     handler_id?: string
-    /** @deprecated Legacy token field */
-    token?: string
-    [key: string]: unknown
+    instrument_type?: string
   }
-  resumed?: boolean
 }
 
 export function paymentSessionDataFor(
-  input: Pick<SetupPaymentInput, "ucp_version" | "payment_data" | "resumed">,
+  input: Pick<SetupPaymentInput, "ucp_version" | "payment_data">,
   storedQuote: unknown,
 ): Record<string, unknown> {
   const sessionData: Record<string, unknown> = { ucp_version: input.ucp_version }
+  const payment = input.payment_data
 
-  if (input.payment_data?.eip3009_authorization) {
-    sessionData.eip3009_authorization = input.payment_data.eip3009_authorization
-    sessionData.credential_sha256 = credentialSha256(input.payment_data.eip3009_authorization)
-    if (input.resumed === true) {
-      sessionData.settlement_resume = true
+  if (payment?.credential_sha256) {
+    sessionData.credential_sha256 = payment.credential_sha256
+    if (payment.x402_version) {
+      sessionData.x402_version = payment.x402_version
     }
-    if (input.payment_data.x402_version) {
-      sessionData.x402_version = input.payment_data.x402_version
+    if (payment.instrument_type) {
+      sessionData.instrument_type = payment.instrument_type
     }
-    if (input.payment_data.instrument_type) {
-      sessionData.instrument_type = input.payment_data.instrument_type
-    }
-  }
-
-  if (input.payment_data?.token && !input.payment_data?.eip3009_authorization) {
-    sessionData.shared_payment_token = input.payment_data.token
   }
 
   if (storedQuote) {
@@ -69,13 +55,13 @@ export function isSettledWithSameCredential(
   session: ExistingPaymentSession,
   input: Pick<SetupPaymentInput, "payment_provider_id" | "payment_data">,
 ): boolean {
-  const credential = input.payment_data?.eip3009_authorization
+  const digest = input.payment_data?.credential_sha256
   return (
     session.status === "authorized" &&
     session.provider_id === input.payment_provider_id &&
-    typeof credential === "string" &&
-    credential.length > 0 &&
-    session.data?.credential_sha256 === credentialSha256(credential) &&
+    typeof digest === "string" &&
+    digest.length > 0 &&
+    session.data?.credential_sha256 === digest &&
     typeof session.data?.prism_tx_id === "string" &&
     session.data.prism_tx_id.length > 0
   )

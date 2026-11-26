@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { authorizeWithHandoff } from "./helpers/credential-handoff"
 import { join } from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import PrismPaymentHandlerAdapter from "../modules/prism-payment-handler/service"
@@ -354,7 +355,7 @@ describe("Prism provider payment calls", () => {
     const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
-    const result = await provider().authorizePayment({ data: { eip3009_authorization: encoded, ucp_version: "2026-01-23", ...quotedSession() } } as any)
+    const result = await authorizeWithHandoff(provider(), { data: { eip3009_authorization: encoded, ucp_version: "2026-01-23", ...quotedSession() } } as any)
 
     expect(result.status).toBe("authorized")
     const calls = fetchStub.mock.calls as unknown as [string, RequestInit][]
@@ -364,13 +365,15 @@ describe("Prism provider payment calls", () => {
     ])
   })
 
-  it("settles on capture", async () => {
-    const fetchStub = vi.fn(async () => new Response(JSON.stringify({ success: true, transaction: "0xtx" }), { status: 200 }))
+  it("never settles on capture, even when the session data carries a credential", async () => {
+    const fetchStub = okFetch()
     vi.stubGlobal("fetch", fetchStub)
 
-    await provider().capturePayment({ data: { x402_authorization: encoded, ucp_version: "latest", ...quotedSession() } } as any)
+    await expect(
+      provider().capturePayment({ data: { x402_authorization: encoded, eip3009_authorization: encoded, ucp_version: "latest", ...quotedSession() } } as any),
+    ).rejects.toThrow("missing_payment_authorization")
 
-    expect(fetchStub).toHaveBeenCalledTimes(1)
+    expect(fetchStub).not.toHaveBeenCalled()
   })
 
   it("carries the UCP version from the payment session input", async () => {
@@ -378,17 +381,4 @@ describe("Prism provider payment calls", () => {
     expect(session.data).toMatchObject({ ucp_version: "2026-04-08" })
   })
 
-  it("authorizes without auto capture and settles on capture", async () => {
-    const fetchStub = okFetch()
-    vi.stubGlobal("fetch", fetchStub)
-    const manual = new PrismPaymentProviderService({}, { api_url: "https://gw.test", api_key: "key", auto_capture: false } as any)
-
-    const authorized = await manual.authorizePayment({ data: { eip3009_authorization: encoded, ...quotedSession() } } as any)
-    expect(authorized.status).toBe("authorized")
-    expect(fetchStub).toHaveBeenCalledTimes(1)
-
-    const captured = await manual.capturePayment({ data: authorized.data } as any)
-    expect((captured.data as Record<string, unknown>).prism_tx_id).toBe("0xtx")
-    expect(fetchStub).toHaveBeenCalledTimes(2)
-  })
 })

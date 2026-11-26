@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { extractUcpPayment } from "../lib/extract-ucp-payment"
+import { credentialSha256 } from "../lib/credential-digest"
 
 const MISSING = { ok: false, code: "missing_payment" }
 
@@ -28,8 +29,7 @@ describe("extractUcpPayment", () => {
       expect(result).toEqual({
         ok: true,
         payment: {
-          eip3009Authorization: "base64-encoded-auth-data",
-          signedSummary: null,
+          credential: expect.objectContaining({ credential_sha256: credentialSha256("base64-encoded-auth-data"), signed_summary: null }),
           x402Version: 2,
           handlerId: "xyz.fd.prism_payment",
           instrumentType: "x402",
@@ -68,7 +68,7 @@ describe("extractUcpPayment", () => {
 
       if (!result.ok) throw new Error(result.code)
       // Should base64-encode the entire credential
-      const decoded = JSON.parse(Buffer.from(result.payment.eip3009Authorization, "base64").toString("utf-8"))
+      const decoded = JSON.parse(Buffer.from(result.payment.credential.secret.reveal(), "base64").toString("utf-8"))
       expect(decoded.paymentPayload.signature).toBe("0xabc")
       expect(decoded.paymentRequirements.scheme).toBe("exact")
       expect(result.payment.x402Version).toBe(2)
@@ -97,7 +97,7 @@ describe("extractUcpPayment", () => {
       })
 
       if (!result.ok) throw new Error(result.code)
-      expect(result.payment.eip3009Authorization).toBe("auth-first")
+      expect(result.payment.credential.secret.reveal()).toBe("auth-first")
       expect(result.payment.handlerId).toBe("handler_a")
     })
 
@@ -142,8 +142,7 @@ describe("extractUcpPayment", () => {
       expect(result).toEqual({
         ok: true,
         payment: {
-          eip3009Authorization: "auth-minimal",
-          signedSummary: null,
+          credential: expect.objectContaining({ credential_sha256: credentialSha256("auth-minimal"), signed_summary: null }),
           x402Version: undefined,
           handlerId: undefined,
           instrumentType: undefined,

@@ -206,8 +206,8 @@ export class PrismClient {
       signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     })
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error")
-      console.error(`[prism-client] GET ${path} failed (${response.status}): ${errorText}`)
+      await response.body?.cancel().catch(() => undefined)
+      console.error(`[prism-client] GET ${path} failed (${response.status})`)
       throw new Error(`Prism GET ${path} failed: ${response.status}`)
     }
     return response.json() as Promise<T>
@@ -224,8 +224,8 @@ export class PrismClient {
       signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     })
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error")
-      console.error(`[prism-client] POST ${path} failed (${response.status}): ${errorText}`)
+      await response.body?.cancel().catch(() => undefined)
+      console.error(`[prism-client] POST ${path} failed (${response.status})`)
       throw new PrismHttpError(response.status, `Prism POST ${path} failed: ${response.status}`)
     }
     return response.json() as Promise<T>

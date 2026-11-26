@@ -10,8 +10,20 @@ const completeRun = vi.hoisted(() => vi.fn(async () => {
   throw new Error("stop after settlement handoff")
 }))
 
+const handoff = vi.hoisted(() => ({
+  last: null as string | null,
+  read: (): string | null =>
+    (globalThis as Record<symbol, { getStore(): { credential: { reveal(): string } } | undefined } | undefined>)[Symbol.for("fd.agentic.prism.credential")]
+      ?.getStore()?.credential.reveal() ?? null,
+}))
+
 vi.mock("../workflows/complete-checkout-session", () => ({
-  default: () => ({ run: completeRun }),
+  default: () => ({
+    run: (args: unknown) => {
+      handoff.last = handoff.read()
+      return (completeRun as (input: unknown) => Promise<unknown>)(args)
+    },
+  }),
 }))
 
 const paymentFlows = vi.hoisted(() => ({
@@ -106,8 +118,12 @@ function setup(
 }
 
 function settledAuthorization() {
-  const input = (completeRun.mock.calls[0] as unknown as [{ input: { payment_data: { eip3009_authorization: string } } }])[0]
-  return input.input.payment_data.eip3009_authorization
+  const handed = handoff.last
+  if (!handed) throw new Error("the complete route ran the workflow without a credential handoff")
+  const input = (completeRun.mock.calls[0] as unknown as [{ input: { payment_data: Record<string, unknown> } }])[0]
+  expect(JSON.stringify(input)).not.toContain(handed)
+  expect(input.input.payment_data.credential_sha256).toBe(credentialSha256(handed))
+  return handed
 }
 
 function settledSummary() {
@@ -478,7 +494,7 @@ describe("ACP complete tamper cases", () => {
 describe("payment session data handed to the provider", () => {
   it("carries the cart's stored quote", () => {
     const data = paymentSessionDataFor(
-      { ucp_version: "2026-04-08", payment_data: { eip3009_authorization: base64Credential(QUOTED_AMOUNT) } },
+      { ucp_version: "2026-04-08", payment_data: { credential_sha256: credentialSha256(base64Credential(QUOTED_AMOUNT)) } },
       storedQuote,
     )
 
@@ -487,7 +503,7 @@ describe("payment session data handed to the provider", () => {
 
   it("carries no quote when the cart has none, so the provider fails closed", () => {
     const data = paymentSessionDataFor(
-      { ucp_version: "2026-04-08", payment_data: { eip3009_authorization: base64Credential(QUOTED_AMOUNT) } },
+      { ucp_version: "2026-04-08", payment_data: { credential_sha256: credentialSha256(base64Credential(QUOTED_AMOUNT)) } },
       undefined,
     )
 
@@ -516,7 +532,7 @@ describe("payment session used to complete a UCP checkout", () => {
         cart_id: "cart_1",
         payment_provider_id: "pp_prism_prism",
         ucp_version: "2026-04-08",
-        payment_data: { eip3009_authorization: pluginAuthorization, x402_version: 2 },
+        payment_data: { credential_sha256: credentialSha256(pluginAuthorization), x402_version: 2 },
       },
       { container },
     )
@@ -535,8 +551,9 @@ describe("payment session used to complete a UCP checkout", () => {
     expect(createdSession()).toMatchObject({
       payment_collection_id: "paycol_1",
       provider_id: "pp_prism_prism",
-      data: { eip3009_authorization: pluginAuthorization, prism_checkout_data: storedQuote },
+      data: { credential_sha256: credentialSha256(pluginAuthorization), prism_checkout_data: storedQuote },
     })
+    expect(JSON.stringify(createdSession())).not.toContain(pluginAuthorization)
   })
 
   it("replaces an authorized session it did not create in this completion", async () => {
@@ -570,7 +587,7 @@ describe("payment session used to complete a UCP checkout", () => {
       id: "payses_other",
       status: "authorized",
       provider_id: "pp_prism_prism",
-      data: { eip3009_authorization: base64Credential("1"), prism_tx_id: "0xother" },
+      data: { credential_sha256: credentialSha256(base64Credential("1")), prism_tx_id: "0xother" },
     }])
 
     expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_other"] } })
@@ -582,7 +599,7 @@ describe("payment session used to complete a UCP checkout", () => {
       id: "payses_unsettled",
       status: "authorized",
       provider_id: "pp_prism_prism",
-      data: { eip3009_authorization: pluginAuthorization },
+      data: { credential_sha256: credentialSha256(pluginAuthorization) },
     }])
 
     expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_unsettled"] } })
@@ -594,7 +611,7 @@ describe("payment session used to complete a UCP checkout", () => {
       id: "payses_system",
       status: "authorized",
       provider_id: "pp_system_default",
-      data: { eip3009_authorization: pluginAuthorization, prism_tx_id: "0xsettled" },
+      data: { credential_sha256: credentialSha256(pluginAuthorization), prism_tx_id: "0xsettled" },
     }])
 
     expect(paymentFlows.deleteSessions).toHaveBeenCalledWith({ input: { ids: ["payses_system"] } })
@@ -629,7 +646,7 @@ describe("UCP completion against a cart changed after its quote", () => {
         cart_id: "cart_1",
         payment_provider_id: paymentProviderId,
         ucp_version: "2026-04-08",
-        payment_data: { eip3009_authorization: pluginAuthorization, x402_version: 2 },
+        payment_data: { credential_sha256: credentialSha256(pluginAuthorization), x402_version: 2 },
       },
       { container: containerFor({ query }, quote) },
     )
@@ -674,7 +691,7 @@ describe("UCP completion against a cart changed after its quote", () => {
           id: "payses_settled",
           status: "authorized",
           provider_id: "pp_prism_prism",
-          data: { eip3009_authorization: pluginAuthorization, prism_tx_id: "0xsettled" },
+          data: { credential_sha256: credentialSha256(pluginAuthorization), prism_tx_id: "0xsettled" },
         }],
       },
     })).rejects.toThrow(/quote_total_mismatch/)
@@ -866,7 +883,7 @@ describe("a signed authorization can be used on one cart only", () => {
   }
 
   const attempt = (container: unknown, cartId: string, authorization: string | undefined, providerId = "pp_prism_prism") =>
-    reserve({ cart_id: cartId, payment_provider_id: providerId, payment_data: authorization ? { eip3009_authorization: authorization } : undefined }, { container })
+    reserve({ cart_id: cartId, payment_provider_id: providerId, payment_data: authorization ? { signed_summary: extractSignedSummary(authorization) } : undefined }, { container })
 
   function credentialWith(change: { from?: string | null; nonce?: string | null; asset?: string }) {
     const payload = signedPayload(QUOTED_AMOUNT)
