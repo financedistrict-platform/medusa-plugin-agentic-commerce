@@ -194,8 +194,8 @@ A standard Medusa v2 payment provider that handles the settlement side:
 | Operation | Description |
 |-----------|-------------|
 | `initiatePayment` | Creates a pending payment session |
-| `authorizePayment` | Verifies the x402 authorization via Prism |
-| `capturePayment` | Settles the authorization on-chain via Prism |
+| `authorizePayment` | Verifies and settles the x402 authorization via Prism, using only the credential handed over by the checkout completion |
+| `capturePayment` | Confirms a payment that was settled during authorization; never settles |
 | `refundPayment` | Rejects with the net amount to refund manually. Prism settles on-chain and does not refund. |
 | `cancelPayment` | Cancels the payment session |
 
@@ -205,7 +205,9 @@ The one-cart-per-authorization rule is enforced by the agentic commerce checkout
 
 The provider and the `prism-payment-handler` module refuse to start when neither the `api_key` option nor the `PRISM_API_KEY` environment variable holds a key, because every payment would be rejected without one. A value of only whitespace counts as no key, and whitespace around a key is removed.
 
-The quote is signed together with the cart resource it was prepared for, so two carts with the same total never share a quote. The quoted total is written as a plain decimal in major units (never with an exponent), and a stored quote is reused only when the resource, the total and the currency all match the cart; a cart total that is not a plain non-negative amount is not quoted. The x402 version always comes from the quote and must be `1` or `2`; any other value is refused before Prism is called. If the verification call fails or does not answer valid, the payment is not authorized and nothing is settled. With `auto_capture` off, a stored authorization is marked `verified` only when Prism verified it.
+The quote is signed together with the cart resource it was prepared for, so two carts with the same total never share a quote. The quoted total is written as a plain decimal in major units (never with an exponent), and a stored quote is reused only when the resource, the total and the currency all match the cart; a cart total that is not a plain non-negative amount is not quoted. The x402 version always comes from the quote and must be `1` or `2`; any other value is refused before Prism is called. If the verification call fails or does not answer valid, the payment is not authorized and nothing is settled. The provider settles while it authorizes, so it refuses to start with `auto_capture: false`.
+
+The provider never reads the payment credential from payment-session data. The agentic commerce checkout completion hands it over in memory for that one request, and the provider authorizes only when the handed credential matches the credential digest on the session. Session data the provider returns holds no credential, and settlement fields that a client writes into a session are cleared. Medusa's own checkout therefore cannot authorize a Prism payment session. This version needs `@financedistrict/medusa-plugin-agentic-commerce` 1.1.7 or later.
 
 A settlement counts only when Prism replies `success: true` with a transaction hash. If the reply also reports a network or amount, they must equal the quoted ones. The provider records the transaction, network, token and settled amount on the payment session (the amount is the quoted amount that the signed authorization was bound to, not a figure Prism reports), and refuses to capture a payment whose settled amount, quote and order total no longer agree.
 
