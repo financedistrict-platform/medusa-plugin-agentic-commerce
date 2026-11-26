@@ -33,6 +33,19 @@ describe("completing a cart outside the agent checkout", () => {
     expect(() => assertAgentCompletion(null, NOW)).not.toThrow()
   })
 
+  it("refuses a cart without an agent session that holds a Prism payment session", () => {
+    const cart = { id: "cart_1", payment_collection: { payment_sessions: [{ provider_id: "pp_system_default" }, { provider_id: "pp_prism_prism" }] } }
+
+    expect(refusal(() => assertAgentCompletion(null, NOW, cart))?.code).toBe(AGENT_CHECKOUT_REQUIRED)
+  })
+
+  it("lets a cart without an agent session complete with another payment provider", () => {
+    const cart = { id: "cart_1", payment_collection: { payment_sessions: [{ provider_id: "pp_system_default" }, null] } }
+
+    expect(() => assertAgentCompletion(null, NOW, cart)).not.toThrow()
+    expect(() => assertAgentCompletion(null, NOW, { id: "cart_1", payment_collection: null })).not.toThrow()
+  })
+
   it("refuses a canceled agent session", () => {
     expect(refusal(() => assertAgentCompletion(session(marker("settling"), secondsAgo(5)), NOW))?.code).toBe(AGENT_CHECKOUT_REQUIRED)
   })

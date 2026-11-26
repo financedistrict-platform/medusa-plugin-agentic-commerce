@@ -1,15 +1,7 @@
-/**
- * Extract payment authorization from UCP complete checkout request body.
- *
- * Reads from payment.instruments[0].credential per UCP spec
- * (checkout.json → payment.json → payment_instrument.json).
- */
-
-import { extractSignedSummary, type SignedPaymentSummary } from "./validate-signed-amount"
+import { agentPaymentCredential, type AgentPaymentCredential } from "./agent-payment-credential"
 
 export type ExtractedPayment = {
-  eip3009Authorization: string
-  signedSummary: SignedPaymentSummary | null
+  credential: AgentPaymentCredential
   x402Version?: number
   handlerId?: string
   instrumentType?: string
@@ -35,8 +27,7 @@ export function extractUcpPayment(body: Record<string, unknown>): UcpPaymentExtr
   return {
     ok: true,
     payment: {
-      eip3009Authorization: settlement.authorization,
-      signedSummary: extractSignedSummary(settlement.authorization),
+      credential: agentPaymentCredential(settlement.authorization),
       x402Version: settlement.x402Version,
       handlerId: instrument.handler_id as string | undefined,
       instrumentType: instrument.type as string | undefined,

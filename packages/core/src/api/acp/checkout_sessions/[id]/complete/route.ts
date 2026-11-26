@@ -1,9 +1,9 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
+import { completeCheckoutWithCredential } from "../../../../../workflows/complete-checkout-with-credential"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
 import { formatAcpError, httpStatusToAcpType } from "../../../../../lib/error-formatters"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
-import { extractSignedSummary } from "../../../../../lib/validate-signed-amount"
+import { agentPaymentCredential } from "../../../../../lib/agent-payment-credential"
 import { checkQuoteBinding, isPrismProvider, PRISM_UCP_HANDLER_ID } from "../../../../../lib/ucp-complete-guard"
 import { agentSessions, fetchSessionCart, handlerDataOf } from "../../../../../lib/agent-session"
 import { recordSettledPayment } from "../../../../../lib/settled-payment-record"
@@ -25,13 +25,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   // Translate ACP instrument credential to internal format
   // Supports both new (authorization) and legacy (token) credential fields
-  const credential = body?.payment_data?.instrument?.credential
-  const eip3009Authorization = credential?.authorization || credential?.token
-  const x402Version = credential?.x402_version
+  const instrumentCredential = body?.payment_data?.instrument?.credential
+  const rawCredential = instrumentCredential?.authorization || instrumentCredential?.token
+  const x402Version = instrumentCredential?.x402_version
   const paymentHandlerId = body?.payment_data?.handler_id
 
-  // F6: Require payment credentials to prevent completing checkout without paying
-  if (!eip3009Authorization) {
+  if (typeof rawCredential !== "string" || rawCredential.length === 0) {
     res.status(400).json(formatAcpError({
       type: "invalid_request",
       code: "missing_payment_data",
@@ -41,12 +40,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     return
   }
 
+  const credential = agentPaymentCredential(rawCredential)
+
   if (isPrismProvider(paymentProviderId)) {
     const session = await agentSessions(req.scope).find(id)
     const bindingFailure = checkQuoteBinding(
       handlerDataOf(session)[PRISM_UCP_HANDLER_ID],
       paymentHandlerId,
-      extractSignedSummary(eip3009Authorization),
+      credential.signed_summary,
       "acp",
     )
     if (bindingFailure) {
@@ -61,24 +62,17 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
 
   try {
-    const { result } = await completeCheckoutSessionWorkflow(req.scope).run({
-      input: {
-        cart_id: id,
-        payment_provider_id: paymentProviderId,
-        ucp_version: agenticCommerceService.getUcpVersion(),
-        payment_data: eip3009Authorization
-          ? {
-              eip3009_authorization: eip3009Authorization,
-              x402_version: x402Version,
-              handler_id: paymentHandlerId,
-            }
-          : undefined,
-      },
-    })
+    const { result } = await completeCheckoutWithCredential(req.scope, {
+      cart_id: id,
+      payment_provider_id: paymentProviderId,
+      ucp_version: agenticCommerceService.getUcpVersion(),
+      x402_version: x402Version,
+      handler_id: paymentHandlerId,
+    }, credential)
 
     const completedCart = await fetchSessionCart(req.scope, id)
     const cart = completedCart
-      ? await recordSettledPayment(req.scope, id, completedCart, eip3009Authorization ? "x402" : "other")
+      ? await recordSettledPayment(req.scope, id, completedCart, "x402")
       : completedCart
 
     // Resolve order id: prefer the workflow result, fall back to the cart link.

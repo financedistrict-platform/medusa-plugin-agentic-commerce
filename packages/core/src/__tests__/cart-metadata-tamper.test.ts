@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { credentialSha256 } from "../lib/credential-digest"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import { createRequest, createResponse, createStoreService, findRoute } from "./helpers/render-wire"
@@ -156,7 +157,7 @@ describe("payment session data handed to the provider", () => {
         cart_id: "cart_1",
         payment_provider_id: "pp_prism_prism",
         ucp_version: "2026-04-08",
-        payment_data: { eip3009_authorization: credential(QUOTED_AMOUNT, MERCHANT), x402_version: 2 },
+        payment_data: { credential_sha256: credentialSha256(credential(QUOTED_AMOUNT, MERCHANT)), x402_version: 2 },
       },
       { container: { resolve: (name: string) => services[name] } },
     )
@@ -190,7 +191,7 @@ describe("payment under the cart lock", () => {
     const services: Record<string, unknown> = { query: { graph: vi.fn(async () => ({ data: [cart] })) }, agenticCommerceSession: sessions }
     paymentFlows.createSessions.mockClear()
     return (setupPaymentStep as unknown as (input: unknown, ctx: unknown) => Promise<unknown>)(
-      { cart_id: "cart_1", payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08", payment_data: { eip3009_authorization: credential(QUOTED_AMOUNT, MERCHANT), x402_version: 2 } },
+      { cart_id: "cart_1", payment_provider_id: "pp_prism_prism", ucp_version: "2026-04-08", payment_data: { credential_sha256: credentialSha256(credential(QUOTED_AMOUNT, MERCHANT)), x402_version: 2 } },
       { container: { resolve: (name: string) => services[name] } },
     )
   }

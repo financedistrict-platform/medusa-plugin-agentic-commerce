@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import completeCheckoutSessionWorkflow from "../../../../../workflows/complete-checkout-session"
+import { completeCheckoutWithCredential } from "../../../../../workflows/complete-checkout-with-credential"
 import { refreshPaymentCollectionForCartWorkflow } from "@medusajs/medusa/core-flows"
 import { getPublicBaseUrl } from "../../../../../lib/public-url"
 import { extractUcpPayment } from "../../../../../lib/extract-ucp-payment"
@@ -83,7 +83,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     return
   }
 
-  const { eip3009Authorization, signedSummary, x402Version, handlerId, instrumentType } = extraction.payment
+  const { credential, x402Version, handlerId, instrumentType } = extraction.payment
   const instrument = body.payment!.instruments[0]
 
   if (isPrismProvider(paymentProviderId)) {
@@ -94,7 +94,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     const session = await agentSessions(req.scope).find(id)
-    const bindingFailure = checkQuoteBinding(handlerDataOf(session)[PRISM_UCP_HANDLER_ID], handlerId, signedSummary)
+    const bindingFailure = checkQuoteBinding(handlerDataOf(session)[PRISM_UCP_HANDLER_ID], handlerId, credential.signed_summary)
     if (bindingFailure) {
       reject(bindingFailure)
       return
@@ -102,23 +102,18 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
 
   try {
-    const { result } = await completeCheckoutSessionWorkflow(req.scope).run({
-      input: {
-        cart_id: id,
-        payment_provider_id: paymentProviderId,
-        ucp_version: ucpVersion,
-        payment_data: {
-          eip3009_authorization: eip3009Authorization,
-          x402_version: x402Version,
-          handler_id: handlerId,
-          instrument_type: instrumentType,
-        },
-      },
-    })
+    const { result } = await completeCheckoutWithCredential(req.scope, {
+      cart_id: id,
+      payment_provider_id: paymentProviderId,
+      ucp_version: ucpVersion,
+      x402_version: x402Version,
+      handler_id: handlerId,
+      instrument_type: instrumentType,
+    }, credential)
 
     const completedCart = await fetchSessionCart(req.scope, id)
     const cart = completedCart
-      ? await recordSettledPayment(req.scope, id, completedCart, eip3009Authorization ? "x402" : "other")
+      ? await recordSettledPayment(req.scope, id, completedCart, "x402")
       : completedCart
 
     // Resolve the actual order id from whichever source is available.

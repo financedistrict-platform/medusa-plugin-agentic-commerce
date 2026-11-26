@@ -20,45 +20,32 @@ import { guardPendingSettlementStep } from "./steps/guard-pending-settlement"
 import { beginSettlementAttemptStep } from "./steps/begin-settlement-attempt"
 import { clearSettlementAttemptStep } from "./steps/clear-settlement-attempt"
 import { paymentToCapture } from "../lib/payment-to-capture"
+import type { SignedPaymentSummary } from "../lib/validate-signed-amount"
 
-type CompleteCheckoutSessionInput = {
+export type CompletionPaymentData = {
+  credential_sha256: string
+  signed_summary: SignedPaymentSummary | null
+  x402_version?: number
+  handler_id?: string
+  instrument_type?: string
+}
+
+export type CompleteCheckoutSessionInput = {
   cart_id: string
   payment_provider_id: string
   ucp_version: string
-  payment_data?: {
-    /** Base64-encoded x402 PaymentAuthorizationResult */
-    eip3009_authorization?: string
-    /** x402 protocol version */
-    x402_version?: number
-    /** Payment handler ID (e.g., "xyz.fd.prism_payment") */
-    handler_id?: string
-    /** @deprecated Legacy fields */
-    provider?: string
-    token?: string
-    [key: string]: unknown
-  }
-  billing_address?: Record<string, unknown>
+  payment_data: CompletionPaymentData
 }
 
 export const CART_LOCK_TTL_SECONDS = 120
 
 export function completionPaymentData(input: CompleteCheckoutSessionInput) {
-  const authorization = input.payment_data?.eip3009_authorization
-  const legacyToken = input.payment_data?.token
-  const hasPaymentData = authorization || legacyToken
-
+  const { credential_sha256, signed_summary, x402_version, handler_id, instrument_type } = input.payment_data
   return {
     cart_id: input.cart_id,
     payment_provider_id: input.payment_provider_id,
     ucp_version: input.ucp_version,
-    payment_data: hasPaymentData
-      ? {
-          eip3009_authorization: authorization || legacyToken,
-          x402_version: input.payment_data?.x402_version,
-          handler_id: input.payment_data?.handler_id,
-          instrument_type: input.payment_data?.instrument_type,
-        }
-      : undefined,
+    payment_data: { credential_sha256, signed_summary, x402_version, handler_id, instrument_type },
   }
 }
 
